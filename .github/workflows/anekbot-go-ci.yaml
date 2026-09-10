@@ -1,0 +1,52 @@
+name: anekbot-go CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - src/anekbot-go/**
+      - .github/workflows/anekbot-go-ci.yaml
+  pull_request:
+    paths:
+      - src/anekbot-go/**
+      - .github/workflows/anekbot-go-ci.yaml
+
+concurrency:
+  group: anekbot-go-ci-${{github.ref}}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: src/anekbot-go
+
+jobs:
+  test:
+    name: Build, vet and test anekbot-go
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: src/anekbot-go/go.mod
+
+      - name: Check formatting
+        run: |
+          fmt_diff="$(gofmt -l .)"
+          if [ -n "$fmt_diff" ]; then
+            echo "The following files are not gofmt'ed:"
+            echo "$fmt_diff"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -race

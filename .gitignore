@@ -22,3 +22,8 @@ pom.xml.asc
 __pycache__
 .pytest_cache
 anekbot.zip
+.tgcloud/
+node_modules
+/src/anekbot-go/anekbot-go
+/src/anekbot-go/dist/
+*.test
