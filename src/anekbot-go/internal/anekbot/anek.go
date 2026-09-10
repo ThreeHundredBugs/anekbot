@@ -1,4 +1,4 @@
-package handlers
+package anekbot
 
 import (
 	"context"
@@ -86,13 +86,14 @@ func (h *AnekHandler) fetchJoke(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// rzhunemogu.ru uses windows-1251 encoding, telegram wants utf8
+	// rzhunemogu.ru serves windows-1251-encoded bytes,
+	// but Telegram rejects non-UTF-8 text
 	utf8Body, err := charmap.Windows1251.NewDecoder().Bytes(body)
 	if err != nil {
 		return "", fmt.Errorf("decode windows-1251 response: %w", err)
 	}
 
-	// The response body is NOT really a JSON
+	// The response isn't valid JSON
 	joke := strings.TrimPrefix(string(utf8Body), `{"content":"`)
 	joke = strings.TrimSuffix(joke, `"}`)
 	return joke, nil

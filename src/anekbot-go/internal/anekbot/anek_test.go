@@ -1,4 +1,4 @@
-package handlers
+package anekbot
 
 import (
 	"context"
@@ -11,9 +11,6 @@ import (
 	"golang.org/x/text/encoding/charmap"
 )
 
-// newTestAnekHandler serves body (a normal UTF-8 Go string) re-encoded as
-// windows-1251, matching the real rzhunemogu.ru API's actual Content-Type
-// charset, so the test exercises the same decode path as production.
 func newTestAnekHandler(t *testing.T, body string, randValue float64) (*AnekHandler, *url.Values) {
 	t.Helper()
 

@@ -1,4 +1,4 @@
-package handlers
+package anekbot
 
 import (
 	"context"
@@ -20,10 +20,10 @@ func newTestSwearingHandler(t *testing.T, extraWordListPath string) *SwearingHan
 
 func TestHandleSwearing_Negative(t *testing.T) {
 	cases := []string{
-		"застрахуй меня", // "хуй" appears only as a substring of "застрахуй", not a whole word
+		"застрахуй меня",
 		"привет",
 		"Клавиши низко посажены",
-		"Анек!дот", // the anek trigger text itself must not be flagged as profanity
+		"Анек!дот",
 		"totally unrelated text with numbers 123",
 	}
 
@@ -131,5 +131,50 @@ func TestHandleSwearing_ExtraWordList(t *testing.T) {
 
 	if len(sender.reactions) != 1 {
 		t.Fatalf("expected a reaction for a word only present in the extra list, got %d", len(sender.reactions))
+	}
+}
+
+func TestLoadSwearWords_EmbeddedOnly(t *testing.T) {
+	words, err := loadSwearWords("")
+	if err != nil {
+		t.Fatalf("loadSwearWords: %v", err)
+	}
+	if _, ok := words["пиздец"]; !ok {
+		t.Error("expected the embedded word list to be loaded")
+	}
+}
+
+func TestLoadSwearWords_MergesAndDedupes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "extra.txt")
+	if err := os.WriteFile(path, []byte("новоеслово\n  ХУЙ  \n\nдругоеслово\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := loadSwearWords("")
+	if err != nil {
+		t.Fatalf("loadSwearWords: %v", err)
+	}
+
+	merged, err := loadSwearWords(path)
+	if err != nil {
+		t.Fatalf("loadSwearWords: %v", err)
+	}
+
+	for _, word := range []string{"новоеслово", "хуй", "другоеслово"} {
+		if _, ok := merged[word]; !ok {
+			t.Errorf("expected %q in merged set", word)
+		}
+	}
+
+	wantSize := len(before) + 2
+	if len(merged) != wantSize {
+		t.Errorf("merged set size = %d, want %d (embedded=%d + 2 new words, no duplicates)", len(merged), wantSize, len(before))
+	}
+}
+
+func TestLoadSwearWords_MissingFile(t *testing.T) {
+	_, err := loadSwearWords(filepath.Join(t.TempDir(), "does-not-exist.txt"))
+	if err == nil {
+		t.Error("expected an error for a missing extra word list file")
 	}
 }

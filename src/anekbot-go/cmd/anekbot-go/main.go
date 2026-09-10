@@ -1,11 +1,10 @@
-// Command anekbot-go runs the anekbot Telegram bot, either as a long-running
-// HTTP server accepting Telegram webhooks (for production, behind a
-// reverse-proxied VPS) or in long-poll mode (for local testing against a
-// real bot token, with no public endpoint needed).
 package main
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -16,15 +15,62 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
-	"github.com/ThreeHundredBugs/anekbot/src/anekbot-go/internal/config"
-	"github.com/ThreeHundredBugs/anekbot/src/anekbot-go/internal/handlers"
-	"github.com/ThreeHundredBugs/anekbot/src/anekbot-go/internal/server"
+	"github.com/ThreeHundredBugs/anekbot/src/anekbot-go/internal/anekbot"
 )
 
 const shutdownTimeout = 5 * time.Second
 
+type config struct {
+	botToken       string
+	mode           string
+	port           string
+	webhookPath    string
+	webhookSecret  string
+	swearWordsFile string
+}
+
+func loadConfig(args []string) (*config, error) {
+	fs := flag.NewFlagSet("anekbot-go", flag.ContinueOnError)
+
+	botToken := fs.String("bot-token", os.Getenv("BOT_TOKEN"), "Telegram bot token (env BOT_TOKEN)")
+	mode := fs.String("mode", envOrDefault("ANEKBOT_MODE", "webhook"), "run mode: webhook or poll (env ANEKBOT_MODE)")
+	port := fs.String("port", envOrDefault("PORT", "8080"), "HTTP port to listen on in webhook mode (env PORT)")
+	webhookPath := fs.String("webhook-path", envOrDefault("WEBHOOK_PATH", "/webhook"), "HTTP path Telegram will POST updates to (env WEBHOOK_PATH)")
+	webhookSecret := fs.String("webhook-secret", os.Getenv("WEBHOOK_SECRET_TOKEN"), "optional secret validated against X-Telegram-Bot-Api-Secret-Token (env WEBHOOK_SECRET_TOKEN)")
+	swearWordsFile := fs.String("swearwords-file", os.Getenv("SWEARWORDS_FILE"), "optional path to an extra swear word list (one word per line) merged with the built-in list (env SWEARWORDS_FILE)")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+
+	cfg := &config{
+		botToken:       *botToken,
+		mode:           *mode,
+		port:           *port,
+		webhookPath:    *webhookPath,
+		webhookSecret:  *webhookSecret,
+		swearWordsFile: *swearWordsFile,
+	}
+
+	if cfg.botToken == "" {
+		return nil, errors.New("bot token is required: set -bot-token or BOT_TOKEN")
+	}
+	if cfg.mode != "webhook" && cfg.mode != "poll" {
+		return nil, fmt.Errorf("invalid mode %q: must be %q or %q", cfg.mode, "webhook", "poll")
+	}
+
+	return cfg, nil
+}
+
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
-	cfg, err := config.Load(os.Args[1:])
+	cfg, err := loadConfig(os.Args[1:])
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -32,41 +78,46 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	swearing, err := handlers.NewSwearingHandler(cfg.ExtraSwearWordListPath)
+	swearing, err := anekbot.NewSwearingHandler(cfg.swearWordsFile)
 	if err != nil {
 		log.Fatalf("swearing handler: %v", err)
 	}
-	dispatcher := handlers.NewDispatcher(handlers.NewAnekHandler(), swearing)
+	dispatcher := anekbot.NewDispatcher(anekbot.NewAnekHandler(), swearing)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
 			dispatcher.Dispatch(ctx, b, update)
 		}),
 	}
-	if cfg.WebhookSecret != "" {
-		opts = append(opts, bot.WithWebhookSecretToken(cfg.WebhookSecret))
+	if cfg.webhookSecret != "" {
+		opts = append(opts, bot.WithWebhookSecretToken(cfg.webhookSecret))
 	}
 
-	b, err := bot.New(cfg.BotToken, opts...)
+	b, err := bot.New(cfg.botToken, opts...)
 	if err != nil {
 		log.Fatalf("create bot: %v", err)
 	}
 
-	switch cfg.Mode {
-	case config.ModePoll:
+	switch cfg.mode {
+	case "poll":
 		log.Println("anekbot-go starting in poll mode")
 		b.Start(ctx)
-	case config.ModeWebhook:
+	case "webhook":
 		runWebhook(ctx, cfg, b)
 	}
 }
 
-func runWebhook(ctx context.Context, cfg *config.Config, b *bot.Bot) {
-	srv := server.New(":"+cfg.Port, cfg.WebhookPath, b.WebhookHandler())
+func runWebhook(ctx context.Context, cfg *config, b *bot.Bot) {
+	mux := http.NewServeMux()
+	mux.HandleFunc(cfg.webhookPath, b.WebhookHandler())
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := &http.Server{Addr: ":" + cfg.port, Handler: mux}
 
 	go func() {
-		log.Printf("anekbot-go listening on %s (webhook path %s)", srv.Addr, cfg.WebhookPath)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("anekbot-go listening on %s (webhook path %s)", srv.Addr, cfg.webhookPath)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}
 	}()
