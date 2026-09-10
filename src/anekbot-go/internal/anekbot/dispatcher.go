@@ -11,6 +11,7 @@ import (
 type Sender interface {
 	SendMessage(ctx context.Context, params *bot.SendMessageParams) (*models.Message, error)
 	SetMessageReaction(ctx context.Context, params *bot.SetMessageReactionParams) (bool, error)
+	AnswerInlineQuery(ctx context.Context, params *bot.AnswerInlineQueryParams) (bool, error)
 }
 
 type Dispatcher struct {
@@ -23,17 +24,20 @@ func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler) *Dispatcher {
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
-	var wg sync.WaitGroup
-
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		d.anek.Handle(ctx, sender, update)
-	}()
-	go func() {
-		defer wg.Done()
-		d.swearing.Handle(ctx, sender, update)
-	}()
-
-	wg.Wait()
+	switch {
+	case update.Message != nil:
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			d.anek.Handle(ctx, sender, update)
+		}()
+		go func() {
+			defer wg.Done()
+			d.swearing.Handle(ctx, sender, update)
+		}()
+		wg.Wait()
+	case update.InlineQuery != nil:
+		d.anek.HandleInline(ctx, sender, update)
+	}
 }

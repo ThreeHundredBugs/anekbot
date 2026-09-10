@@ -7,7 +7,9 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -22,6 +24,9 @@ const (
 	// http://rzhunemogu.ru/FAQ.aspx
 	anekTypeNormal = 1
 	anekType18Plus = 11
+
+	inlineSuggestionCount = 3
+	inlineTitleMaxRunes   = 60
 )
 
 type AnekHandler struct {
@@ -61,6 +66,58 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 	}); err != nil {
 		log.Printf("anek handler: send message: %v", err)
 	}
+}
+
+func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *models.Update) {
+	if update.InlineQuery == nil {
+		return
+	}
+	query := update.InlineQuery
+
+	jokes := make([]string, inlineSuggestionCount)
+	var wg sync.WaitGroup
+	wg.Add(inlineSuggestionCount)
+	for i := range jokes {
+		go func(i int) {
+			defer wg.Done()
+			joke, err := h.fetchJoke(ctx)
+			if err != nil {
+				log.Printf("anek handler: fetch joke for inline query: %v", err)
+				return
+			}
+			jokes[i] = joke
+		}(i)
+	}
+	wg.Wait()
+
+	results := make([]models.InlineQueryResult, 0, inlineSuggestionCount)
+	for i, joke := range jokes {
+		if joke == "" {
+			continue
+		}
+		results = append(results, &models.InlineQueryResultArticle{
+			ID:                  strconv.Itoa(i),
+			Title:               inlineTitle(joke),
+			InputMessageContent: models.InputTextMessageContent{MessageText: joke},
+		})
+	}
+
+	if _, err := sender.AnswerInlineQuery(ctx, &bot.AnswerInlineQueryParams{
+		InlineQueryID: query.ID,
+		Results:       results,
+		CacheTime:     1, // 0 is indistinguishable from unset and gets dropped
+	}); err != nil {
+		log.Printf("anek handler: answer inline query: %v", err)
+	}
+}
+
+func inlineTitle(joke string) string {
+	preview := strings.Join(strings.Fields(joke), " ")
+	runes := []rune(preview)
+	if len(runes) <= inlineTitleMaxRunes {
+		return preview
+	}
+	return string(runes[:inlineTitleMaxRunes]) + "…"
 }
 
 func (h *AnekHandler) fetchJoke(ctx context.Context) (string, error) {
