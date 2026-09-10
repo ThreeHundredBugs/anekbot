@@ -32,7 +32,11 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	dispatcher := handlers.NewDispatcher(handlers.NewAnekHandler())
+	swearing, err := handlers.NewSwearingHandler(cfg.ExtraSwearWordListPath)
+	if err != nil {
+		log.Fatalf("swearing handler: %v", err)
+	}
+	dispatcher := handlers.NewDispatcher(handlers.NewAnekHandler(), swearing)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {

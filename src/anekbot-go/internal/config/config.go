@@ -16,15 +16,14 @@ const (
 )
 
 type Config struct {
-	BotToken      string
-	Mode          string
-	Port          string
-	WebhookPath   string
-	WebhookSecret string
+	BotToken               string
+	Mode                   string
+	Port                   string
+	WebhookPath            string
+	WebhookSecret          string
+	ExtraSwearWordListPath string
 }
 
-// Load parses configuration from command-line flags (given in args, without
-// the program name) with environment variables as defaults.
 func Load(args []string) (*Config, error) {
 	fs := flag.NewFlagSet("anekbot-go", flag.ContinueOnError)
 
@@ -33,21 +32,23 @@ func Load(args []string) (*Config, error) {
 	port := fs.String("port", envOrDefault("PORT", "8080"), "HTTP port to listen on in webhook mode (env PORT)")
 	webhookPath := fs.String("webhook-path", envOrDefault("WEBHOOK_PATH", "/webhook"), "HTTP path Telegram will POST updates to (env WEBHOOK_PATH)")
 	webhookSecret := fs.String("webhook-secret", os.Getenv("WEBHOOK_SECRET_TOKEN"), "optional secret validated against X-Telegram-Bot-Api-Secret-Token (env WEBHOOK_SECRET_TOKEN)")
+	extraSwearWordListPath := fs.String("swearwords-file", os.Getenv("SWEARWORDS_FILE"), "optional path to an extra swear word list (one word per line) merged with the built-in list (env SWEARWORDS_FILE)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 
 	cfg := &Config{
-		BotToken:      *botToken,
-		Mode:          *mode,
-		Port:          *port,
-		WebhookPath:   *webhookPath,
-		WebhookSecret: *webhookSecret,
+		BotToken:               *botToken,
+		Mode:                   *mode,
+		Port:                   *port,
+		WebhookPath:            *webhookPath,
+		WebhookSecret:          *webhookSecret,
+		ExtraSwearWordListPath: *extraSwearWordListPath,
 	}
 
 	if cfg.BotToken == "" {
-		return nil, errors.New("bot token is required: set -bot-token or BOT_TOKEN")
+		return nil, errors.New("bot token is required: set via -bot-token flag or BOT_TOKEN env")
 	}
 	if cfg.Mode != ModeWebhook && cfg.Mode != ModePoll {
 		return nil, fmt.Errorf("invalid mode %q: must be %q or %q", cfg.Mode, ModeWebhook, ModePoll)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"golang.org/x/text/encoding/charmap"
 )
 
 const (
@@ -23,15 +24,12 @@ const (
 	anekType18Plus = 11
 )
 
-// AnekHandler replies with a random joke fetched from rzhunemogu.ru whenever
-// a message contains the "анек!" trigger substring.
 type AnekHandler struct {
 	client    *http.Client
 	baseURL   string
 	randFloat func() float64
 }
 
-// NewAnekHandler builds an AnekHandler that talks to the real rzhunemogu.ru API.
 func NewAnekHandler() *AnekHandler {
 	return &AnekHandler{
 		client:    &http.Client{Timeout: 10 * time.Second},
@@ -40,7 +38,6 @@ func NewAnekHandler() *AnekHandler {
 	}
 }
 
-// Handle implements the anek trigger behavior.
 func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
@@ -68,7 +65,6 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 
 func (h *AnekHandler) fetchJoke(ctx context.Context) (string, error) {
 	anekType := anekTypeNormal
-	// 15% chance of an 18+ joke, matching the Python `random.random() > 0.85` split.
 	if h.randFloat() > 0.85 {
 		anekType = anekType18Plus
 	}
@@ -90,10 +86,14 @@ func (h *AnekHandler) fetchJoke(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// The response body is NOT valid JSON (it contains unescaped quotes and
-	// raw newlines inside the "content" value), so it must be extracted via
-	// literal prefix/suffix trimming rather than encoding/json.
-	joke := strings.TrimPrefix(string(body), `{"content":"`)
+	// rzhunemogu.ru uses windows-1251 encoding, telegram wants utf8
+	utf8Body, err := charmap.Windows1251.NewDecoder().Bytes(body)
+	if err != nil {
+		return "", fmt.Errorf("decode windows-1251 response: %w", err)
+	}
+
+	// The response body is NOT really a JSON
+	joke := strings.TrimPrefix(string(utf8Body), `{"content":"`)
 	joke = strings.TrimSuffix(joke, `"}`)
 	return joke, nil
 }

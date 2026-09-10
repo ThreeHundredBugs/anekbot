@@ -8,15 +8,24 @@ import (
 	"testing"
 
 	"github.com/go-telegram/bot/models"
+	"golang.org/x/text/encoding/charmap"
 )
 
+// newTestAnekHandler serves body (a normal UTF-8 Go string) re-encoded as
+// windows-1251, matching the real rzhunemogu.ru API's actual Content-Type
+// charset, so the test exercises the same decode path as production.
 func newTestAnekHandler(t *testing.T, body string, randValue float64) (*AnekHandler, *url.Values) {
 	t.Helper()
+
+	win1251Body, err := charmap.Windows1251.NewEncoder().String(body)
+	if err != nil {
+		t.Fatalf("encode fixture as windows-1251: %v", err)
+	}
 
 	var captured url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		captured = r.URL.Query()
-		w.Write([]byte(body))
+		w.Write([]byte(win1251Body))
 	}))
 	t.Cleanup(server.Close)
 
@@ -29,9 +38,6 @@ func newTestAnekHandler(t *testing.T, body string, randValue float64) (*AnekHand
 }
 
 func TestAnekHandler_Trigger(t *testing.T) {
-	// Real rzhunemogu.ru responses are NOT valid JSON: the content can contain
-	// unescaped quotes and raw newlines, so the handler must use prefix/suffix
-	// trimming rather than encoding/json.
 	wantJoke := `Штирлиц вошел в комнату и сказал: "привет"` + "\n" + `всем`
 	fixture := `{"content":"` + wantJoke + `"}`
 

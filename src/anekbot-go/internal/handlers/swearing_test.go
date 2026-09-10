@@ -2,10 +2,21 @@ package handlers
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
 )
+
+func newTestSwearingHandler(t *testing.T, extraWordListPath string) *SwearingHandler {
+	t.Helper()
+	h, err := NewSwearingHandler(extraWordListPath)
+	if err != nil {
+		t.Fatalf("NewSwearingHandler: %v", err)
+	}
+	return h
+}
 
 func TestHandleSwearing_Negative(t *testing.T) {
 	cases := []string{
@@ -16,6 +27,8 @@ func TestHandleSwearing_Negative(t *testing.T) {
 		"totally unrelated text with numbers 123",
 	}
 
+	h := newTestSwearingHandler(t, "")
+
 	for _, text := range cases {
 		t.Run(text, func(t *testing.T) {
 			sender := &fakeSender{}
@@ -25,7 +38,7 @@ func TestHandleSwearing_Negative(t *testing.T) {
 				Text: text,
 			}}
 
-			HandleSwearing(context.Background(), sender, update)
+			h.Handle(context.Background(), sender, update)
 
 			if len(sender.reactions) != 0 {
 				t.Errorf("expected no reaction for %q, got %d", text, len(sender.reactions))
@@ -43,6 +56,8 @@ func TestHandleSwearing_Positive(t *testing.T) {
 		"здарова, заебал",
 	}
 
+	h := newTestSwearingHandler(t, "")
+
 	for _, text := range cases {
 		t.Run(text, func(t *testing.T) {
 			sender := &fakeSender{}
@@ -52,7 +67,7 @@ func TestHandleSwearing_Positive(t *testing.T) {
 				Text: text,
 			}}
 
-			HandleSwearing(context.Background(), sender, update)
+			h.Handle(context.Background(), sender, update)
 
 			if len(sender.reactions) != 1 {
 				t.Fatalf("expected exactly 1 reaction for %q, got %d", text, len(sender.reactions))
@@ -72,10 +87,8 @@ func TestHandleSwearing_Positive(t *testing.T) {
 	}
 }
 
-// TestHandleSwearing_UnicodeTokenizer regression-tests that Cyrillic words are
-// tokenized at all: Go's regexp \w/\b are ASCII-only unlike Python's re, so a
-// naive port would silently never match any Cyrillic swear word.
 func TestHandleSwearing_UnicodeTokenizer(t *testing.T) {
+	h := newTestSwearingHandler(t, "")
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
 		ID:   3,
@@ -83,7 +96,7 @@ func TestHandleSwearing_UnicodeTokenizer(t *testing.T) {
 		Text: "Слушай,ты-пиздец,чувак!",
 	}}
 
-	HandleSwearing(context.Background(), sender, update)
+	h.Handle(context.Background(), sender, update)
 
 	if len(sender.reactions) != 1 {
 		t.Fatalf("expected the Cyrillic swear word to be tokenized and matched, got %d reactions", len(sender.reactions))
@@ -91,10 +104,32 @@ func TestHandleSwearing_UnicodeTokenizer(t *testing.T) {
 }
 
 func TestHandleSwearing_NoMessage(t *testing.T) {
+	h := newTestSwearingHandler(t, "")
 	sender := &fakeSender{}
-	HandleSwearing(context.Background(), sender, &models.Update{})
+	h.Handle(context.Background(), sender, &models.Update{})
 
 	if len(sender.reactions) != 0 {
 		t.Errorf("expected no reaction when Message is nil, got %d", len(sender.reactions))
+	}
+}
+
+func TestHandleSwearing_ExtraWordList(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "extra.txt")
+	if err := os.WriteFile(path, []byte("флюродендрон\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestSwearingHandler(t, path)
+	sender := &fakeSender{}
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "ты флюродендрон!",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.reactions) != 1 {
+		t.Fatalf("expected a reaction for a word only present in the extra list, got %d", len(sender.reactions))
 	}
 }

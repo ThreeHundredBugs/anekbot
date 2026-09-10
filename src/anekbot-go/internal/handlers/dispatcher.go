@@ -7,18 +7,15 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-// Dispatcher fans every update out to all registered handlers concurrently,
-// mirroring the Python dispatcher's asyncio.gather(handle_anek, handle_swearing).
 type Dispatcher struct {
-	anek *AnekHandler
+	anek     *AnekHandler
+	swearing *SwearingHandler
 }
 
-func NewDispatcher(anek *AnekHandler) *Dispatcher {
-	return &Dispatcher{anek: anek}
+func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler) *Dispatcher {
+	return &Dispatcher{anek: anek, swearing: swearing}
 }
 
-// Dispatch runs all handlers concurrently. Each handler logs and swallows
-// its own errors, so one handler's failure never affects the other.
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
 	var wg sync.WaitGroup
 
@@ -29,7 +26,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 	}()
 	go func() {
 		defer wg.Done()
-		HandleSwearing(ctx, sender, update)
+		d.swearing.Handle(ctx, sender, update)
 	}()
 
 	wg.Wait()

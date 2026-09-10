@@ -10,14 +10,22 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-// wordPattern must be Unicode-aware: Go's regexp \w/\b are ASCII-only, unlike
-// Python's re module, so a naive \b\w+\b port would silently fail to
-// tokenize Cyrillic text.
+// wordPattern must be Unicode-aware
 var wordPattern = regexp.MustCompile(`[\p{L}\p{N}_]+`)
 
-// HandleSwearing reacts with 🤬 to messages containing profanity, mirroring
-// the exact-token matching behavior of the Python swearing_handler.
-func HandleSwearing(ctx context.Context, sender Sender, update *models.Update) {
+type SwearingHandler struct {
+	words map[string]struct{}
+}
+
+func NewSwearingHandler(extraWordListPath string) (*SwearingHandler, error) {
+	words, err := loadSwearWords(extraWordListPath)
+	if err != nil {
+		return nil, err
+	}
+	return &SwearingHandler{words: words}, nil
+}
+
+func (h *SwearingHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
 	}
@@ -25,7 +33,7 @@ func HandleSwearing(ctx context.Context, sender Sender, update *models.Update) {
 
 	words := wordPattern.FindAllString(strings.ToLower(msg.Text), -1)
 	for _, word := range words {
-		if _, isSwearing := swearWords[word]; !isSwearing {
+		if _, isSwearing := h.words[word]; !isSwearing {
 			continue
 		}
 

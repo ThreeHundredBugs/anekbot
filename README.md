@@ -64,6 +64,7 @@ BOT_TOKEN=<your-test-bot-token> ./anekbot-go -mode=poll
 | `-port` | `PORT` | `8080` | webhook mode only |
 | `-webhook-path` | `WEBHOOK_PATH` | `/webhook` | webhook mode only |
 | `-webhook-secret` | `WEBHOOK_SECRET_TOKEN` | *(disabled)* | optional, validates Telegram's secret token header |
+| `-swearwords-file` | `SWEARWORDS_FILE` | *(none)* | optional path to an extra swear word list (one word per line), merged with the built-in list at startup, duplicates removed |
 
 ### Releases
 

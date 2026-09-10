@@ -8,8 +8,7 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-// fakeSender records calls instead of talking to Telegram, playing the same
-// role as Python's AsyncMock(spec=telegram.Bot) in the original tests.
+// fakeSender records calls instead of talking to Telegram
 type fakeSender struct {
 	mu           sync.Mutex
 	sentMessages []*bot.SendMessageParams
