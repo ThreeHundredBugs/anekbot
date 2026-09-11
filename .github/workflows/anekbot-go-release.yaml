@@ -1,4 +1,4 @@
-name: anekbot-go Release
+name: anekbot Release
 
 on:
   push:
@@ -33,6 +33,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: src/anekbot-go/go.mod
+          cache-dependency-path: src/anekbot-go/go.sum
 
       - name: Build
         env:
@@ -41,21 +42,21 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w" -o dist/anekbot-go ./cmd/anekbot-go
+          go build -trimpath -ldflags="-s -w" -o dist/anekbot ./cmd/anekbot
 
       - name: Package
         run: |
-          archive="anekbot-go-${{matrix.goos}}-${{matrix.goarch}}.tar.gz"
-          tar -C dist -czf "$archive" anekbot-go
+          archive="anekbot-${{matrix.goos}}-${{matrix.goarch}}.tar.gz"
+          tar -C dist -czf "$archive" anekbot
           sha256sum "$archive" > "$archive.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: anekbot-go-${{matrix.goos}}-${{matrix.goarch}}
+          name: anekbot-${{matrix.goos}}-${{matrix.goarch}}
           path: |
-            src/anekbot-go/anekbot-go-${{matrix.goos}}-${{matrix.goarch}}.tar.gz
-            src/anekbot-go/anekbot-go-${{matrix.goos}}-${{matrix.goarch}}.tar.gz.sha256
+            src/anekbot-go/anekbot-${{matrix.goos}}-${{matrix.goarch}}.tar.gz
+            src/anekbot-go/anekbot-${{matrix.goos}}-${{matrix.goarch}}.tar.gz.sha256
 
   release:
     name: Create GitHub Release
@@ -65,7 +66,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

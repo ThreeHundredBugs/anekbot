@@ -30,7 +30,7 @@ type config struct {
 }
 
 func loadConfig(args []string) (*config, error) {
-	fs := flag.NewFlagSet("anekbot-go", flag.ContinueOnError)
+	fs := flag.NewFlagSet("anekbot", flag.ContinueOnError)
 
 	botToken := fs.String("bot-token", os.Getenv("BOT_TOKEN"), "Telegram bot token (env BOT_TOKEN)")
 	mode := fs.String("mode", envOrDefault("ANEKBOT_MODE", "webhook"), "run mode: webhook or poll (env ANEKBOT_MODE)")
@@ -100,7 +100,7 @@ func main() {
 
 	switch cfg.mode {
 	case "poll":
-		log.Println("anekbot-go starting in poll mode")
+		log.Println("anekbot starting in poll mode")
 		b.Start(ctx)
 	case "webhook":
 		runWebhook(ctx, cfg, b)
@@ -116,7 +116,7 @@ func runWebhook(ctx context.Context, cfg *config, b *bot.Bot) {
 	srv := &http.Server{Addr: ":" + cfg.port, Handler: mux}
 
 	go func() {
-		log.Printf("anekbot-go listening on %s (webhook path %s)", srv.Addr, cfg.webhookPath)
+		log.Printf("anekbot listening on %s (webhook path %s)", srv.Addr, cfg.webhookPath)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}
