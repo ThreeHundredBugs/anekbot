@@ -78,8 +78,42 @@ func TestDispatch_Message_RunsGeminiAndSwearingHandlers(t *testing.T) {
 
 	d.Dispatch(context.Background(), sender, update)
 
-	if len(sender.sentMessages) != 2 {
-		t.Errorf("expected gemini and swearing handler to send each 1 message, got %d", len(sender.sentMessages))
+	if len(sender.sentMessages) != 1 {
+		t.Errorf("expected the gemini handler to send 1 message, got %d", len(sender.sentMessages))
+	}
+	if len(sender.reactions) != 1 {
+		t.Errorf("expected the swearing handler to react once, got %d reactions", len(sender.reactions))
+	}
+}
+
+func TestDispatch_Message_SkipsDisabledAnekAndSwearing(t *testing.T) {
+	d := NewDispatcher(nil, nil, nil)
+	sender := &fakeSender{}
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "анек! нам всем пиздец",
+	}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 0 {
+		t.Errorf("expected a disabled anek handler to send no messages, got %d", len(sender.sentMessages))
+	}
+	if len(sender.reactions) != 0 {
+		t.Errorf("expected a disabled swearing handler to set no reactions, got %d", len(sender.reactions))
+	}
+}
+
+func TestDispatch_InlineQuery_SkipsDisabledAnek(t *testing.T) {
+	d := NewDispatcher(nil, nil, nil)
+	sender := &fakeSender{}
+	update := &models.Update{InlineQuery: &models.InlineQuery{ID: "q1"}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.inlineAnswers) != 0 {
+		t.Errorf("expected a disabled anek handler to answer no inline queries, got %d", len(sender.inlineAnswers))
 	}
 }
 

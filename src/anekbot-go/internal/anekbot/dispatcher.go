@@ -15,9 +15,10 @@ type Sender interface {
 }
 
 type Dispatcher struct {
+	// nil disables the handler
 	anek     *AnekHandler
 	swearing *SwearingHandler
-	gemini   *GeminiHandler // nil when the @mention LLM feature is disabled
+	gemini   *GeminiHandler
 }
 
 func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, gemini *GeminiHandler) *Dispatcher {
@@ -31,9 +32,12 @@ func (d *Dispatcher) SetGemini(gemini *GeminiHandler) {
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
 	switch {
 	case update.Message != nil:
-		handlers := []func(context.Context, Sender, *models.Update){
-			d.anek.Handle,
-			d.swearing.Handle,
+		var handlers []func(context.Context, Sender, *models.Update)
+		if d.anek != nil {
+			handlers = append(handlers, d.anek.Handle)
+		}
+		if d.swearing != nil {
+			handlers = append(handlers, d.swearing.Handle)
 		}
 		if d.gemini != nil {
 			handlers = append(handlers, d.gemini.Handle)
@@ -49,6 +53,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		}
 		wg.Wait()
 	case update.InlineQuery != nil:
-		d.anek.HandleInline(ctx, sender, update)
+		if d.anek != nil {
+			d.anek.HandleInline(ctx, sender, update)
+		}
 	}
 }

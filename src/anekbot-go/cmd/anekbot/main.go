@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -21,14 +22,17 @@ import (
 const shutdownTimeout = 5 * time.Second
 
 type config struct {
-	botToken       string
-	mode           string
-	port           string
-	webhookPath    string
-	webhookSecret  string
-	swearWordsFile string
-	geminiAPIKey   string
-	geminiModel    string
+	botToken        string
+	mode            string
+	port            string
+	webhookPath     string
+	webhookSecret   string
+	swearWordsFile  string
+	geminiAPIKey    string
+	geminiModel     string
+	disableAnek     bool
+	disableSwearing bool
+	disableGemini   bool
 }
 
 func loadConfig(args []string) (*config, error) {
@@ -42,20 +46,26 @@ func loadConfig(args []string) (*config, error) {
 	swearWordsFile := fs.String("swearwords-file", os.Getenv("SWEARWORDS_FILE"), "optional path to an extra swear word list (one word per line) merged with the built-in list (env SWEARWORDS_FILE)")
 	geminiAPIKey := fs.String("gemini-api-key", os.Getenv("GEMINI_API_KEY"), "optional Gemini API key; when set, @mentioning the bot asks Gemini and replies with the answer (env GEMINI_API_KEY)")
 	geminiModel := fs.String("gemini-model", os.Getenv("GEMINI_MODEL"), "Gemini model used for the @mention LLM feature, defaults to gemini-3.6-flash (env GEMINI_MODEL)")
+	disableAnek := fs.Bool("disable-anek", envBool("DISABLE_ANEK"), "disable the \"анек!\" joke trigger and inline joke queries (env DISABLE_ANEK)")
+	disableSwearing := fs.Bool("disable-swearing", envBool("DISABLE_SWEARING"), "disable reacting to swear words (env DISABLE_SWEARING)")
+	disableGemini := fs.Bool("disable-gemini", envBool("DISABLE_GEMINI"), "disable the @mention LLM feature even if -gemini-api-key is set (env DISABLE_GEMINI)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 
 	cfg := &config{
-		botToken:       *botToken,
-		mode:           *mode,
-		port:           *port,
-		webhookPath:    *webhookPath,
-		webhookSecret:  *webhookSecret,
-		swearWordsFile: *swearWordsFile,
-		geminiAPIKey:   *geminiAPIKey,
-		geminiModel:    *geminiModel,
+		botToken:        *botToken,
+		mode:            *mode,
+		port:            *port,
+		webhookPath:     *webhookPath,
+		webhookSecret:   *webhookSecret,
+		swearWordsFile:  *swearWordsFile,
+		geminiAPIKey:    *geminiAPIKey,
+		geminiModel:     *geminiModel,
+		disableAnek:     *disableAnek,
+		disableSwearing: *disableSwearing,
+		disableGemini:   *disableGemini,
 	}
 
 	if cfg.botToken == "" {
@@ -75,6 +85,11 @@ func envOrDefault(key, def string) string {
 	return def
 }
 
+func envBool(key string) bool {
+	v, _ := strconv.ParseBool(os.Getenv(key))
+	return v
+}
+
 func main() {
 	cfg, err := loadConfig(os.Args[1:])
 	if err != nil {
@@ -84,11 +99,20 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	swearing, err := anekbot.NewSwearingHandler(cfg.swearWordsFile)
-	if err != nil {
-		log.Fatalf("swearing handler: %v", err)
+	var anek *anekbot.AnekHandler
+	if !cfg.disableAnek {
+		anek = anekbot.NewAnekHandler()
 	}
-	dispatcher := anekbot.NewDispatcher(anekbot.NewAnekHandler(), swearing, nil)
+
+	var swearing *anekbot.SwearingHandler
+	if !cfg.disableSwearing {
+		swearing, err = anekbot.NewSwearingHandler(cfg.swearWordsFile)
+		if err != nil {
+			log.Fatalf("swearing handler: %v", err)
+		}
+	}
+
+	dispatcher := anekbot.NewDispatcher(anek, swearing, nil)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -104,7 +128,7 @@ func main() {
 		log.Fatalf("create bot: %v", err)
 	}
 
-	if cfg.geminiAPIKey != "" {
+	if cfg.geminiAPIKey != "" && !cfg.disableGemini {
 		me, err := b.GetMe(ctx)
 		if err != nil {
 			log.Fatalf("get bot info: %v", err)
