@@ -14,7 +14,7 @@ func newTestDispatcher(t *testing.T) *Dispatcher {
 	if err != nil {
 		t.Fatalf("NewSwearingHandler: %v", err)
 	}
-	return NewDispatcher(anek, swearing, nil)
+	return NewDispatcher(anek, swearing, nil, nil)
 }
 
 func TestDispatch_Message_DoesNotAnswerInlineQuery(t *testing.T) {
@@ -43,7 +43,7 @@ func TestDispatch_Message_RunsLLMHandlerWhenConfigured(t *testing.T) {
 		t.Fatalf("NewSwearingHandler: %v", err)
 	}
 	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
-	d := NewDispatcher(anek, swearing, llm)
+	d := NewDispatcher(anek, swearing, llm, nil)
 
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
@@ -66,7 +66,7 @@ func TestDispatch_Message_RunsLLMAndSwearingHandlers(t *testing.T) {
 		t.Fatalf("NewSwearingHandler: %v", err)
 	}
 	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
-	d := NewDispatcher(anek, swearing, llm)
+	d := NewDispatcher(anek, swearing, llm, nil)
 
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
@@ -86,7 +86,7 @@ func TestDispatch_Message_RunsLLMAndSwearingHandlers(t *testing.T) {
 }
 
 func TestDispatch_Message_SkipsDisabledAnekAndSwearing(t *testing.T) {
-	d := NewDispatcher(nil, nil, nil)
+	d := NewDispatcher(nil, nil, nil, nil)
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
 		ID:   1,
@@ -104,8 +104,31 @@ func TestDispatch_Message_SkipsDisabledAnekAndSwearing(t *testing.T) {
 	}
 }
 
+func TestDispatch_Message_RunsHelpHandlerWhenConfigured(t *testing.T) {
+	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	swearing, err := NewSwearingHandler("")
+	if err != nil {
+		t.Fatalf("NewSwearingHandler: %v", err)
+	}
+	help := NewHelpHandler("anekbot", true, true, true)
+	d := NewDispatcher(anek, swearing, nil, help)
+
+	sender := &fakeSender{}
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "/help",
+	}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 1 {
+		t.Errorf("expected the help handler to send 1 message, got %d", len(sender.sentMessages))
+	}
+}
+
 func TestDispatch_InlineQuery_SkipsDisabledAnek(t *testing.T) {
-	d := NewDispatcher(nil, nil, nil)
+	d := NewDispatcher(nil, nil, nil, nil)
 	sender := &fakeSender{}
 	update := &models.Update{InlineQuery: &models.InlineQuery{ID: "q1"}}
 

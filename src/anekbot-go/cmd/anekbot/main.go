@@ -118,7 +118,7 @@ func main() {
 		}
 	}
 
-	dispatcher := anekbot.NewDispatcher(anek, swearing, nil)
+	dispatcher := anekbot.NewDispatcher(anek, swearing, nil, nil)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -132,6 +132,11 @@ func main() {
 	b, err := bot.New(cfg.botToken, opts...)
 	if err != nil {
 		log.Fatalf("create bot: %v", err)
+	}
+
+	me, err := b.GetMe(ctx)
+	if err != nil {
+		log.Fatalf("get bot info: %v", err)
 	}
 
 	useGemini := cfg.geminiAPIKey != "" && !cfg.disableLLM
@@ -149,12 +154,10 @@ func main() {
 	}
 
 	if primary != nil {
-		me, err := b.GetMe(ctx)
-		if err != nil {
-			log.Fatalf("get bot info: %v", err)
-		}
 		dispatcher.SetLLM(anekbot.NewLLMHandler(me.Username, primary, fallback))
 	}
+
+	dispatcher.SetHelp(anekbot.NewHelpHandler(me.Username, !cfg.disableAnek, !cfg.disableSwearing, primary != nil))
 
 	switch cfg.mode {
 	case "poll":

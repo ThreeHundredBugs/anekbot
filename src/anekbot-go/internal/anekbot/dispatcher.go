@@ -19,14 +19,19 @@ type Dispatcher struct {
 	anek     *AnekHandler
 	swearing *SwearingHandler
 	llm      *LLMHandler
+	help     *HelpHandler
 }
 
-func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, llm *LLMHandler) *Dispatcher {
-	return &Dispatcher{anek: anek, swearing: swearing, llm: llm}
+func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, llm *LLMHandler, help *HelpHandler) *Dispatcher {
+	return &Dispatcher{anek: anek, swearing: swearing, llm: llm, help: help}
 }
 
 func (d *Dispatcher) SetLLM(llm *LLMHandler) {
 	d.llm = llm
+}
+
+func (d *Dispatcher) SetHelp(help *HelpHandler) {
+	d.help = help
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
@@ -41,6 +46,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		}
 		if d.llm != nil {
 			handlers = append(handlers, d.llm.Handle)
+		}
+		if d.help != nil {
+			handlers = append(handlers, d.help.Handle)
 		}
 
 		var wg sync.WaitGroup
