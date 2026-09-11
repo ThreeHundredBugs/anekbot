@@ -2,7 +2,6 @@ package anekbot
 
 import (
 	"context"
-	"net/http"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
@@ -37,14 +36,14 @@ func TestDispatch_Message_DoesNotAnswerInlineQuery(t *testing.T) {
 	}
 }
 
-func TestDispatch_Message_RunsGeminiHandlerWhenConfigured(t *testing.T) {
+func TestDispatch_Message_RunsLLMHandlerWhenConfigured(t *testing.T) {
 	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	swearing, err := NewSwearingHandler("")
 	if err != nil {
 		t.Fatalf("NewSwearingHandler: %v", err)
 	}
-	gemini, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"42"}]}}]}`)
-	d := NewDispatcher(anek, swearing, gemini)
+	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
+	d := NewDispatcher(anek, swearing, llm)
 
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
@@ -56,18 +55,18 @@ func TestDispatch_Message_RunsGeminiHandlerWhenConfigured(t *testing.T) {
 	d.Dispatch(context.Background(), sender, update)
 
 	if len(sender.sentMessages) != 1 {
-		t.Errorf("expected the gemini handler to send 1 message, got %d", len(sender.sentMessages))
+		t.Errorf("expected the llm handler to send 1 message, got %d", len(sender.sentMessages))
 	}
 }
 
-func TestDispatch_Message_RunsGeminiAndSwearingHandlers(t *testing.T) {
+func TestDispatch_Message_RunsLLMAndSwearingHandlers(t *testing.T) {
 	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	swearing, err := NewSwearingHandler("")
 	if err != nil {
 		t.Fatalf("NewSwearingHandler: %v", err)
 	}
-	gemini, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"42"}]}}]}`)
-	d := NewDispatcher(anek, swearing, gemini)
+	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
+	d := NewDispatcher(anek, swearing, llm)
 
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
@@ -79,7 +78,7 @@ func TestDispatch_Message_RunsGeminiAndSwearingHandlers(t *testing.T) {
 	d.Dispatch(context.Background(), sender, update)
 
 	if len(sender.sentMessages) != 1 {
-		t.Errorf("expected the gemini handler to send 1 message, got %d", len(sender.sentMessages))
+		t.Errorf("expected the llm handler to send 1 message, got %d", len(sender.sentMessages))
 	}
 	if len(sender.reactions) != 1 {
 		t.Errorf("expected the swearing handler to react once, got %d reactions", len(sender.reactions))

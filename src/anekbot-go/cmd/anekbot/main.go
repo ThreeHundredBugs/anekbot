@@ -30,9 +30,11 @@ type config struct {
 	swearWordsFile  string
 	geminiAPIKey    string
 	geminiModel     string
+	hfAPIKey        string
+	hfModel         string
 	disableAnek     bool
 	disableSwearing bool
-	disableGemini   bool
+	disableLLM      bool
 }
 
 func loadConfig(args []string) (*config, error) {
@@ -46,9 +48,11 @@ func loadConfig(args []string) (*config, error) {
 	swearWordsFile := fs.String("swearwords-file", os.Getenv("SWEARWORDS_FILE"), "optional path to an extra swear word list (one word per line) merged with the built-in list (env SWEARWORDS_FILE)")
 	geminiAPIKey := fs.String("gemini-api-key", os.Getenv("GEMINI_API_KEY"), "optional Gemini API key; when set, @mentioning the bot asks Gemini and replies with the answer (env GEMINI_API_KEY)")
 	geminiModel := fs.String("gemini-model", os.Getenv("GEMINI_MODEL"), "Gemini model used for the @mention LLM feature, defaults to gemini-3.6-flash (env GEMINI_MODEL)")
+	hfAPIKey := fs.String("hf-api-key", os.Getenv("HF_API_KEY"), "optional Hugging Face API token; used as a fallback for the @mention LLM feature when Gemini is unavailable, or as the primary provider when Gemini isn't configured (env HF_API_KEY)")
+	hfModel := fs.String("hf-model", os.Getenv("HF_MODEL"), "Hugging Face model used for the @mention LLM feature, defaults to meta-llama/Llama-3.3-70B-Instruct (env HF_MODEL)")
 	disableAnek := fs.Bool("disable-anek", envBool("DISABLE_ANEK"), "disable the \"анек!\" joke trigger and inline joke queries (env DISABLE_ANEK)")
 	disableSwearing := fs.Bool("disable-swearing", envBool("DISABLE_SWEARING"), "disable reacting to swear words (env DISABLE_SWEARING)")
-	disableGemini := fs.Bool("disable-gemini", envBool("DISABLE_GEMINI"), "disable the @mention LLM feature even if -gemini-api-key is set (env DISABLE_GEMINI)")
+	disableLLM := fs.Bool("disable-llm", envBool("DISABLE_LLM"), "disable the @mention LLM feature even if -gemini-api-key or -hf-api-key is set (env DISABLE_LLM)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -63,9 +67,11 @@ func loadConfig(args []string) (*config, error) {
 		swearWordsFile:  *swearWordsFile,
 		geminiAPIKey:    *geminiAPIKey,
 		geminiModel:     *geminiModel,
+		hfAPIKey:        *hfAPIKey,
+		hfModel:         *hfModel,
 		disableAnek:     *disableAnek,
 		disableSwearing: *disableSwearing,
-		disableGemini:   *disableGemini,
+		disableLLM:      *disableLLM,
 	}
 
 	if cfg.botToken == "" {
@@ -128,12 +134,26 @@ func main() {
 		log.Fatalf("create bot: %v", err)
 	}
 
-	if cfg.geminiAPIKey != "" && !cfg.disableGemini {
+	useGemini := cfg.geminiAPIKey != "" && !cfg.disableLLM
+	useHF := cfg.hfAPIKey != "" && !cfg.disableLLM
+
+	var primary, fallback anekbot.LLMProvider
+	switch {
+	case useGemini && useHF:
+		primary = anekbot.NewGeminiProvider(cfg.geminiAPIKey, cfg.geminiModel)
+		fallback = anekbot.NewHuggingFaceProvider(cfg.hfAPIKey, cfg.hfModel)
+	case useGemini:
+		primary = anekbot.NewGeminiProvider(cfg.geminiAPIKey, cfg.geminiModel)
+	case useHF:
+		primary = anekbot.NewHuggingFaceProvider(cfg.hfAPIKey, cfg.hfModel)
+	}
+
+	if primary != nil {
 		me, err := b.GetMe(ctx)
 		if err != nil {
 			log.Fatalf("get bot info: %v", err)
 		}
-		dispatcher.SetGemini(anekbot.NewGeminiHandler(cfg.geminiAPIKey, cfg.geminiModel, me.Username))
+		dispatcher.SetLLM(anekbot.NewLLMHandler(me.Username, primary, fallback))
 	}
 
 	switch cfg.mode {

@@ -18,15 +18,15 @@ type Dispatcher struct {
 	// nil disables the handler
 	anek     *AnekHandler
 	swearing *SwearingHandler
-	gemini   *GeminiHandler
+	llm      *LLMHandler
 }
 
-func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, gemini *GeminiHandler) *Dispatcher {
-	return &Dispatcher{anek: anek, swearing: swearing, gemini: gemini}
+func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, llm *LLMHandler) *Dispatcher {
+	return &Dispatcher{anek: anek, swearing: swearing, llm: llm}
 }
 
-func (d *Dispatcher) SetGemini(gemini *GeminiHandler) {
-	d.gemini = gemini
+func (d *Dispatcher) SetLLM(llm *LLMHandler) {
+	d.llm = llm
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
@@ -39,8 +39,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		if d.swearing != nil {
 			handlers = append(handlers, d.swearing.Handle)
 		}
-		if d.gemini != nil {
-			handlers = append(handlers, d.gemini.Handle)
+		if d.llm != nil {
+			handlers = append(handlers, d.llm.Handle)
 		}
 
 		var wg sync.WaitGroup

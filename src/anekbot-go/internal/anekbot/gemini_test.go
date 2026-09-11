@@ -6,68 +6,53 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
-
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 )
 
-func newTestGeminiHandler(t *testing.T, statusCode int, responseBody string) (h *GeminiHandler, lastRequest func() geminiRequest) {
+func newTestGeminiProvider(t *testing.T, statusCode int, responseBody string) (p *geminiProvider, lastRequest func() geminiRequest, lastPath func() string) {
 	t.Helper()
 
 	var mu sync.Mutex
 	var captured geminiRequest
+	var path string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		json.Unmarshal(body, &captured)
+		path = r.URL.Path
 		mu.Unlock()
 		w.WriteHeader(statusCode)
 		w.Write([]byte(responseBody))
 	}))
 	t.Cleanup(server.Close)
 
-	h = NewGeminiHandler("test-key", "", "anekbot")
-	h.client = server.Client()
-	h.baseURL = server.URL
+	p = NewGeminiProvider("test-key", "")
+	p.client = server.Client()
+	p.baseURL = server.URL
 
 	lastRequest = func() geminiRequest {
 		mu.Lock()
 		defer mu.Unlock()
 		return captured
 	}
-	return h, lastRequest
+	lastPath = func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return path
+	}
+	return p, lastRequest, lastPath
 }
 
-func TestGeminiHandler_Trigger(t *testing.T) {
-	h, lastRequest := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"42"}]}}]}`)
-	sender := &fakeSender{}
+func TestGeminiProvider_Ask_Success(t *testing.T) {
+	p, lastRequest, lastPath := newTestGeminiProvider(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"  42  "}]}}]}`)
 
-	update := &models.Update{Message: &models.Message{
-		ID:   5,
-		Chat: models.Chat{ID: 7},
-		Text: "@anekbot what is the answer to everything?",
-	}}
-
-	h.Handle(context.Background(), sender, update)
-
-	if len(sender.sentMessages) != 1 {
-		t.Fatalf("expected 1 message sent, got %d", len(sender.sentMessages))
+	answer, err := p.Ask(context.Background(), "what is the answer to everything?")
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
 	}
-	sent := sender.sentMessages[0]
-	if sent.Text != "42" {
-		t.Errorf("text = %q, want %q", sent.Text, "42")
-	}
-	if sent.ChatID != int64(7) {
-		t.Errorf("chat id = %v, want 7", sent.ChatID)
-	}
-	if sent.ReplyParameters == nil || sent.ReplyParameters.MessageID != 5 {
-		t.Errorf("reply parameters = %+v, want reply to message 5", sent.ReplyParameters)
-	}
-	if sent.ParseMode != models.ParseModeHTML {
-		t.Errorf("parse mode = %q, want %q", sent.ParseMode, models.ParseModeHTML)
+	if answer != "42" {
+		t.Errorf("answer = %q, want %q", answer, "42")
 	}
 
 	req := lastRequest()
@@ -77,135 +62,48 @@ func TestGeminiHandler_Trigger(t *testing.T) {
 	if want := "what is the answer to everything?"; req.Contents[0].Parts[0].Text != want {
 		t.Errorf("question = %q, want %q", req.Contents[0].Parts[0].Text, want)
 	}
-}
-
-func TestGeminiHandler_CaseInsensitiveMention(t *testing.T) {
-	h, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"fact"}]}}]}`)
-	sender := &fakeSender{}
-
-	update := &models.Update{Message: &models.Message{
-		ID:   1,
-		Chat: models.Chat{ID: 1},
-		Text: "@AnekBot tell me a fact",
-	}}
-
-	h.Handle(context.Background(), sender, update)
-
-	if len(sender.sentMessages) != 1 {
-		t.Errorf("expected mention to match case-insensitively, got %d messages", len(sender.sentMessages))
+	if req.SystemInstruction == nil || req.SystemInstruction.Parts[0].Text != llmSystemPrompt {
+		t.Errorf("system instruction = %+v, want the shared llmSystemPrompt", req.SystemInstruction)
+	}
+	if want := "/models/" + defaultGeminiModel + ":generateContent"; lastPath() != want {
+		t.Errorf("request path = %q, want %q", lastPath(), want)
 	}
 }
 
-func TestGeminiHandler_NoMention(t *testing.T) {
-	h, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"fact"}]}}]}`)
-	sender := &fakeSender{}
+func TestGeminiProvider_Ask_CustomModel(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	t.Cleanup(server.Close)
 
-	update := &models.Update{Message: &models.Message{
-		ID:   1,
-		Chat: models.Chat{ID: 1},
-		Text: "просто привет",
-	}}
+	p := NewGeminiProvider("test-key", "custom-model")
+	p.client = server.Client()
+	p.baseURL = server.URL
 
-	h.Handle(context.Background(), sender, update)
-
-	if len(sender.sentMessages) != 0 {
-		t.Errorf("expected no message sent without a mention, got %d", len(sender.sentMessages))
+	if _, err := p.Ask(context.Background(), "hi"); err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if want := "/models/custom-model:generateContent"; path != want {
+		t.Errorf("request path = %q, want %q", path, want)
 	}
 }
 
-func TestGeminiHandler_MentionWithoutQuestion(t *testing.T) {
-	h, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"fact"}]}}]}`)
-	sender := &fakeSender{}
+func TestGeminiProvider_Ask_APIError(t *testing.T) {
+	p, _, _ := newTestGeminiProvider(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
 
-	update := &models.Update{Message: &models.Message{
-		ID:   1,
-		Chat: models.Chat{ID: 1},
-		Text: "@anekbot",
-	}}
-
-	h.Handle(context.Background(), sender, update)
-
-	if len(sender.sentMessages) != 0 {
-		t.Errorf("expected no message sent for a bare mention with no question, got %d", len(sender.sentMessages))
+	_, err := p.Ask(context.Background(), "are you ok")
+	if err == nil {
+		t.Fatal("expected an error on a non-200 response")
 	}
 }
 
-func TestGeminiHandler_NoMessage(t *testing.T) {
-	h, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"fact"}]}}]}`)
-	sender := &fakeSender{}
+func TestGeminiProvider_Ask_NoCandidates(t *testing.T) {
+	p, _, _ := newTestGeminiProvider(t, http.StatusOK, `{"candidates":[]}`)
 
-	h.Handle(context.Background(), sender, &models.Update{})
-
-	if len(sender.sentMessages) != 0 {
-		t.Errorf("expected no message sent when Message is nil, got %d", len(sender.sentMessages))
-	}
-}
-
-func TestGeminiHandler_APIError(t *testing.T) {
-	h, _ := newTestGeminiHandler(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
-	sender := &fakeSender{}
-
-	update := &models.Update{Message: &models.Message{
-		ID:   1,
-		Chat: models.Chat{ID: 1},
-		Text: "@anekbot are you ok",
-	}}
-
-	h.Handle(context.Background(), sender, update)
-
-	if len(sender.sentMessages) != 1 {
-		t.Fatalf("expected 1 unavailability message sent on API error, got %d", len(sender.sentMessages))
-	}
-	if sent := sender.sentMessages[0]; sent.Text != geminiUnavailableMessage {
-		t.Errorf("text = %q, want %q", sent.Text, geminiUnavailableMessage)
-	}
-}
-
-func TestGeminiHandler_FallsBackToPlainTextWhenHTMLRejected(t *testing.T) {
-	h, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"<b>42</b>"}]}}]}`)
-	sender := &fakeSender{
-		failSendMessageIf: func(p *bot.SendMessageParams) bool {
-			return p.ParseMode == models.ParseModeHTML
-		},
-	}
-
-	update := &models.Update{Message: &models.Message{
-		ID:   1,
-		Chat: models.Chat{ID: 1},
-		Text: "@anekbot what is the answer?",
-	}}
-
-	h.Handle(context.Background(), sender, update)
-
-	if len(sender.sentMessages) != 1 {
-		t.Fatalf("expected 1 message sent after falling back, got %d", len(sender.sentMessages))
-	}
-	sent := sender.sentMessages[0]
-	if sent.ParseMode != "" {
-		t.Errorf("fallback parse mode = %q, want empty (plain text)", sent.ParseMode)
-	}
-	if sent.Text != "<b>42</b>" {
-		t.Errorf("fallback text = %q, want %q", sent.Text, "<b>42</b>")
-	}
-}
-
-func TestGeminiHandler_TruncatesLongAnswer(t *testing.T) {
-	longAnswer := strings.Repeat("a", telegramMessageMaxRunes+100)
-	h, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"`+longAnswer+`"}]}}]}`)
-	sender := &fakeSender{}
-
-	update := &models.Update{Message: &models.Message{
-		ID:   1,
-		Chat: models.Chat{ID: 1},
-		Text: "@anekbot tell me a long story",
-	}}
-
-	h.Handle(context.Background(), sender, update)
-
-	if len(sender.sentMessages) != 1 {
-		t.Fatalf("expected 1 message sent, got %d", len(sender.sentMessages))
-	}
-	if got := len([]rune(sender.sentMessages[0].Text)); got != telegramMessageMaxRunes {
-		t.Errorf("sent text length = %d runes, want %d", got, telegramMessageMaxRunes)
+	_, err := p.Ask(context.Background(), "are you ok")
+	if err == nil {
+		t.Fatal("expected an error when no candidates are returned")
 	}
 }

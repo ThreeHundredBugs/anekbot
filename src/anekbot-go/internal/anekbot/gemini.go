@@ -7,31 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
-
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 )
 
 const (
 	defaultGeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultGeminiModel   = "gemini-3.6-flash"
 	geminiRequestTimeout = 30 * time.Second
-	geminiSystemPrompt   = "You are a helpful assistant replying in a Telegram chat. Keep answers concise. " +
-		"This is a one-shot reply: the user cannot follow up or continue the conversation, so make your answer " +
-		"self-contained and don't ask clarifying questions or offer to elaborate further. " +
-		"Reply in Russian by default, unless the user's message is clearly written in another language, in which " +
-		"case reply in that language instead. Don't format the message unless needed. " +
-		"If you need to format, reply as Telegram HTML: only <b>, <i>, <u>, <s>, <code>, <pre> and <a href=\"...\"> tags are " +
-		"supported, no other tags or Markdown syntax. Escape any literal <, > and & that aren't part of a tag."
-
-	telegramMessageMaxRunes = 4096
-
-	geminiUnavailableMessage = "Gemini сейчас недоступен, попробуйте ещё раз позже."
 )
 
 type geminiPart struct {
@@ -57,89 +41,32 @@ type geminiResponse struct {
 	} `json:"error"`
 }
 
-type GeminiHandler struct {
-	client         *http.Client
-	baseURL        string
-	apiKey         string
-	model          string
-	mentionPattern *regexp.Regexp
+type geminiProvider struct {
+	client  *http.Client
+	baseURL string
+	apiKey  string
+	model   string
 }
 
-func NewGeminiHandler(apiKey, model, botUsername string) *GeminiHandler {
+func NewGeminiProvider(apiKey, model string) *geminiProvider {
 	if model == "" {
 		model = defaultGeminiModel
 	}
-	return &GeminiHandler{
-		client:         &http.Client{Timeout: geminiRequestTimeout},
-		baseURL:        defaultGeminiBaseURL,
-		apiKey:         apiKey,
-		model:          model,
-		mentionPattern: regexp.MustCompile(`(?i)@` + regexp.QuoteMeta(botUsername) + `\b`),
+	return &geminiProvider{
+		client:  &http.Client{Timeout: geminiRequestTimeout},
+		baseURL: defaultGeminiBaseURL,
+		apiKey:  apiKey,
+		model:   model,
 	}
 }
 
-func (h *GeminiHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
-	if update.Message == nil || update.Message.Text == "" {
-		return
-	}
-	msg := update.Message
-
-	question, ok := h.extractQuestion(msg.Text)
-	if !ok {
-		return
-	}
-
-	answer, err := h.ask(ctx, question)
-	if err != nil {
-		log.Printf("gemini handler: ask: %v", err)
-		if _, sendErr := sender.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          msg.Chat.ID,
-			Text:            geminiUnavailableMessage,
-			ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
-		}); sendErr != nil {
-			log.Printf("gemini handler: send unavailable message: %v", sendErr)
-		}
-		return
-	}
-	answer = truncateToRunes(answer, telegramMessageMaxRunes)
-
-	_, err = sender.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          msg.Chat.ID,
-		Text:            answer,
-		ParseMode:       models.ParseModeHTML,
-		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
-	})
-	if err == nil {
-		return
-	}
-	log.Printf("gemini handler: send message: %v", err)
-
-	// The model's HTML may be malformed; fall back to plain text rather than dropping the answer.
-	if _, err := sender.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          msg.Chat.ID,
-		Text:            answer,
-		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
-	}); err != nil {
-		log.Printf("gemini handler: send plain-text fallback: %v", err)
-	}
+func (p *geminiProvider) Name() string {
+	return "Gemini"
 }
 
-func (h *GeminiHandler) extractQuestion(text string) (question string, ok bool) {
-	loc := h.mentionPattern.FindStringIndex(text)
-	if loc == nil {
-		return "", false
-	}
-
-	question = strings.TrimSpace(text[:loc[0]] + text[loc[1]:])
-	if question == "" {
-		return "", false
-	}
-	return question, true
-}
-
-func (h *GeminiHandler) ask(ctx context.Context, question string) (string, error) {
+func (p *geminiProvider) Ask(ctx context.Context, question string) (string, error) {
 	reqBody := geminiRequest{
-		SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: geminiSystemPrompt}}},
+		SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: llmSystemPrompt}}},
 		Contents: []geminiContent{
 			{Role: "user", Parts: []geminiPart{{Text: question}}},
 		},
@@ -149,15 +76,15 @@ func (h *GeminiHandler) ask(ctx context.Context, question string) (string, error
 		return "", err
 	}
 
-	url := fmt.Sprintf("%s/models/%s:generateContent", h.baseURL, h.model)
+	url := fmt.Sprintf("%s/models/%s:generateContent", p.baseURL, p.model)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", h.apiKey)
+	req.Header.Set("x-goog-api-key", p.apiKey)
 
-	resp, err := h.client.Do(req)
+	resp, err := p.client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -184,12 +111,4 @@ func (h *GeminiHandler) ask(ctx context.Context, question string) (string, error
 	}
 
 	return strings.TrimSpace(parsed.Candidates[0].Content.Parts[0].Text), nil
-}
-
-func truncateToRunes(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[:max])
 }
