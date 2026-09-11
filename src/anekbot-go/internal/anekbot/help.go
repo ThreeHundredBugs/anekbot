@@ -2,7 +2,6 @@ package anekbot
 
 import (
 	"context"
-	"log"
 	"regexp"
 	"strings"
 
@@ -44,6 +43,10 @@ func buildHelpText(botUsername string, anekEnabled, swearingEnabled, llmEnabled 
 	return b.String()
 }
 
+func (h *HelpHandler) Name() string {
+	return "help"
+}
+
 func (h *HelpHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
@@ -53,12 +56,13 @@ func (h *HelpHandler) Handle(ctx context.Context, sender Sender, update *models.
 	if !h.commandPattern.MatchString(msg.Text) {
 		return
 	}
+	logDebugf("help handler: replying to /help in chat_id=%d", msg.Chat.ID)
 
 	if _, err := sender.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          msg.Chat.ID,
 		Text:            h.text,
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
-		log.Printf("help handler: send message: %v", err)
+		logWarnf("help handler: send message: %v", err)
 	}
 }

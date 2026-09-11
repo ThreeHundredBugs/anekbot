@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -31,6 +30,10 @@ func NewSwearingHandler(extraWordListPath string) (*SwearingHandler, error) {
 	return &SwearingHandler{words: words}, nil
 }
 
+func (h *SwearingHandler) Name() string {
+	return "swearing"
+}
+
 func (h *SwearingHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
@@ -43,6 +46,7 @@ func (h *SwearingHandler) Handle(ctx context.Context, sender Sender, update *mod
 			continue
 		}
 
+		logDebugf("swearing handler: reacting to %q in chat_id=%d", word, msg.Chat.ID)
 		if _, err := sender.SetMessageReaction(ctx, &bot.SetMessageReactionParams{
 			ChatID:    msg.Chat.ID,
 			MessageID: msg.ID,
@@ -53,7 +57,7 @@ func (h *SwearingHandler) Handle(ctx context.Context, sender Sender, update *mod
 				},
 			},
 		}); err != nil {
-			log.Printf("swearing handler: set message reaction: %v", err)
+			logWarnf("swearing handler: set message reaction: %v", err)
 		}
 		return
 	}

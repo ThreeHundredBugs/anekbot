@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -43,6 +42,10 @@ func NewAnekHandler() *AnekHandler {
 	}
 }
 
+func (h *AnekHandler) Name() string {
+	return "anek"
+}
+
 func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
@@ -52,10 +55,11 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 	if !strings.Contains(strings.ToLower(msg.Text), anekTrigger) {
 		return
 	}
+	logDebugf("anek handler: matched trigger in chat_id=%d", msg.Chat.ID)
 
 	joke, err := h.fetchJoke(ctx)
 	if err != nil {
-		log.Printf("anek handler: fetch joke: %v", err)
+		logWarnf("anek handler: fetch joke: %v", err)
 		return
 	}
 
@@ -64,7 +68,7 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 		Text:            joke,
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
-		log.Printf("anek handler: send message: %v", err)
+		logWarnf("anek handler: send message: %v", err)
 	}
 }
 
@@ -82,7 +86,7 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 			defer wg.Done()
 			joke, err := h.fetchJoke(ctx)
 			if err != nil {
-				log.Printf("anek handler: fetch joke for inline query: %v", err)
+				logWarnf("anek handler: fetch joke for inline query: %v", err)
 				return
 			}
 			jokes[i] = joke
@@ -102,12 +106,13 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 		})
 	}
 
+	logDebugf("anek handler: answering inline query with %d results", len(results))
 	if _, err := sender.AnswerInlineQuery(ctx, &bot.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
 		Results:       results,
 		CacheTime:     1, // 0 is indistinguishable from unset and gets dropped
 	}); err != nil {
-		log.Printf("anek handler: answer inline query: %v", err)
+		logWarnf("anek handler: answer inline query: %v", err)
 	}
 }
 
