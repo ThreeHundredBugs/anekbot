@@ -21,9 +21,15 @@ const (
 	defaultGeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultGeminiModel   = "gemini-3.6-flash"
 	geminiRequestTimeout = 30 * time.Second
-	geminiSystemPrompt   = "You are a helpful assistant replying in a Telegram chat. Keep answers concise."
+	geminiSystemPrompt   = "You are a helpful assistant replying in a Telegram chat. Keep answers concise. " +
+		"Reply in Russian by default, unless the user's message is clearly written in another language, in which " +
+		"case reply in that language instead. Don't format the message unless needed. " +
+		"If you need to format, reply as Telegram HTML: only <b>, <i>, <u>, <s>, <code>, <pre> and <a href=\"...\"> tags are " +
+		"supported, no other tags or Markdown syntax. Escape any literal <, > and & that aren't part of a tag."
 
 	telegramMessageMaxRunes = 4096
+
+	geminiUnavailableMessage = "Gemini сейчас недоступен, попробуйте ещё раз позже."
 )
 
 type geminiPart struct {
@@ -84,15 +90,35 @@ func (h *GeminiHandler) Handle(ctx context.Context, sender Sender, update *model
 	answer, err := h.ask(ctx, question)
 	if err != nil {
 		log.Printf("gemini handler: ask: %v", err)
+		if _, sendErr := sender.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:          msg.Chat.ID,
+			Text:            geminiUnavailableMessage,
+			ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
+		}); sendErr != nil {
+			log.Printf("gemini handler: send unavailable message: %v", sendErr)
+		}
 		return
 	}
+	answer = truncateToRunes(answer, telegramMessageMaxRunes)
 
+	_, err = sender.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          msg.Chat.ID,
+		Text:            answer,
+		ParseMode:       models.ParseModeHTML,
+		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
+	})
+	if err == nil {
+		return
+	}
+	log.Printf("gemini handler: send message: %v", err)
+
+	// The model's HTML may be malformed; fall back to plain text rather than dropping the answer.
 	if _, err := sender.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          msg.Chat.ID,
-		Text:            truncateToRunes(answer, telegramMessageMaxRunes),
+		Text:            answer,
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
-		log.Printf("gemini handler: send message: %v", err)
+		log.Printf("gemini handler: send plain-text fallback: %v", err)
 	}
 }
 

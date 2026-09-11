@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
 
@@ -64,6 +65,9 @@ func TestGeminiHandler_Trigger(t *testing.T) {
 	}
 	if sent.ReplyParameters == nil || sent.ReplyParameters.MessageID != 5 {
 		t.Errorf("reply parameters = %+v, want reply to message 5", sent.ReplyParameters)
+	}
+	if sent.ParseMode != models.ParseModeHTML {
+		t.Errorf("parse mode = %q, want %q", sent.ParseMode, models.ParseModeHTML)
 	}
 
 	req := lastRequest()
@@ -149,8 +153,39 @@ func TestGeminiHandler_APIError(t *testing.T) {
 
 	h.Handle(context.Background(), sender, update)
 
-	if len(sender.sentMessages) != 0 {
-		t.Errorf("expected no message sent on API error, got %d", len(sender.sentMessages))
+	if len(sender.sentMessages) != 1 {
+		t.Fatalf("expected 1 unavailability message sent on API error, got %d", len(sender.sentMessages))
+	}
+	if sent := sender.sentMessages[0]; sent.Text != geminiUnavailableMessage {
+		t.Errorf("text = %q, want %q", sent.Text, geminiUnavailableMessage)
+	}
+}
+
+func TestGeminiHandler_FallsBackToPlainTextWhenHTMLRejected(t *testing.T) {
+	h, _ := newTestGeminiHandler(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"<b>42</b>"}]}}]}`)
+	sender := &fakeSender{
+		failSendMessageIf: func(p *bot.SendMessageParams) bool {
+			return p.ParseMode == models.ParseModeHTML
+		},
+	}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "@anekbot what is the answer?",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 1 {
+		t.Fatalf("expected 1 message sent after falling back, got %d", len(sender.sentMessages))
+	}
+	sent := sender.sentMessages[0]
+	if sent.ParseMode != "" {
+		t.Errorf("fallback parse mode = %q, want empty (plain text)", sent.ParseMode)
+	}
+	if sent.Text != "<b>42</b>" {
+		t.Errorf("fallback text = %q, want %q", sent.Text, "<b>42</b>")
 	}
 }
 
