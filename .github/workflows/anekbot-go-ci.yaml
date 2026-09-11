@@ -1,4 +1,4 @@
-name: anekbot-go CI
+name: anekbot CI
 
 on:
   push:
@@ -13,7 +13,7 @@ on:
       - .github/workflows/anekbot-go-ci.yaml
 
 concurrency:
-  group: anekbot-go-ci-${{github.ref}}
+  group: anekbot-ci-${{github.ref}}
   cancel-in-progress: true
 
 defaults:
@@ -22,7 +22,7 @@ defaults:
 
 jobs:
   test:
-    name: Build, vet and test anekbot-go
+    name: Build, vet and test anekbot
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,6 +32,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: src/anekbot-go/go.mod
+          cache-dependency-path: src/anekbot-go/go.sum
 
       - name: Check formatting
         run: |

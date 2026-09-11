@@ -15,29 +15,54 @@ type Sender interface {
 }
 
 type Dispatcher struct {
+	// nil disables the handler
 	anek     *AnekHandler
 	swearing *SwearingHandler
+	llm      *LLMHandler
+	help     *HelpHandler
 }
 
-func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler) *Dispatcher {
-	return &Dispatcher{anek: anek, swearing: swearing}
+func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, llm *LLMHandler, help *HelpHandler) *Dispatcher {
+	return &Dispatcher{anek: anek, swearing: swearing, llm: llm, help: help}
+}
+
+func (d *Dispatcher) SetLLM(llm *LLMHandler) {
+	d.llm = llm
+}
+
+func (d *Dispatcher) SetHelp(help *HelpHandler) {
+	d.help = help
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
 	switch {
 	case update.Message != nil:
+		var handlers []func(context.Context, Sender, *models.Update)
+		if d.anek != nil {
+			handlers = append(handlers, d.anek.Handle)
+		}
+		if d.swearing != nil {
+			handlers = append(handlers, d.swearing.Handle)
+		}
+		if d.llm != nil {
+			handlers = append(handlers, d.llm.Handle)
+		}
+		if d.help != nil {
+			handlers = append(handlers, d.help.Handle)
+		}
+
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			d.anek.Handle(ctx, sender, update)
-		}()
-		go func() {
-			defer wg.Done()
-			d.swearing.Handle(ctx, sender, update)
-		}()
+		wg.Add(len(handlers))
+		for _, handle := range handlers {
+			go func(handle func(context.Context, Sender, *models.Update)) {
+				defer wg.Done()
+				handle(ctx, sender, update)
+			}(handle)
+		}
 		wg.Wait()
 	case update.InlineQuery != nil:
-		d.anek.HandleInline(ctx, sender, update)
+		if d.anek != nil {
+			d.anek.HandleInline(ctx, sender, update)
+		}
 	}
 }
