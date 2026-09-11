@@ -3,7 +3,6 @@ package anekbot
 import (
 	"context"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 
@@ -44,6 +43,10 @@ func NewLLMHandler(botUsername string, primary, fallback LLMProvider) *LLMHandle
 	}
 }
 
+func (h *LLMHandler) Name() string {
+	return "llm"
+}
+
 func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
@@ -54,16 +57,17 @@ func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.U
 	if !ok {
 		return
 	}
+	logDebugf("llm handler: answering question in chat_id=%d", msg.Chat.ID)
 
 	provider := h.primary
 	answer, err := provider.Ask(ctx, question)
 	if err != nil {
-		log.Printf("llm handler: primary provider: %v", err)
+		logWarnf("llm handler: primary provider: %v", err)
 		if h.fallback != nil {
 			provider = h.fallback
 			answer, err = provider.Ask(ctx, question)
 			if err != nil {
-				log.Printf("llm handler: fallback provider: %v", err)
+				logWarnf("llm handler: fallback provider: %v", err)
 			}
 		}
 	}
@@ -73,7 +77,7 @@ func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.U
 			Text:            llmUnavailableMessage,
 			ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 		}); sendErr != nil {
-			log.Printf("llm handler: send unavailable message: %v", sendErr)
+			logWarnf("llm handler: send unavailable message: %v", sendErr)
 		}
 		return
 	}
@@ -90,7 +94,7 @@ func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.U
 	if err == nil {
 		return
 	}
-	log.Printf("llm handler: send message: %v", err)
+	logWarnf("llm handler: send message: %v", err)
 
 	// The model's HTML may be malformed; fall back to plain text rather than dropping the answer.
 	if _, err := sender.SendMessage(ctx, &bot.SendMessageParams{
@@ -98,7 +102,7 @@ func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.U
 		Text:            answer,
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
-		log.Printf("llm handler: send plain-text fallback: %v", err)
+		logWarnf("llm handler: send plain-text fallback: %v", err)
 	}
 }
 

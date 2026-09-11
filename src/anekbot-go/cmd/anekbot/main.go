@@ -32,6 +32,7 @@ type config struct {
 	geminiModel     string
 	hfAPIKey        string
 	hfModel         string
+	logLevel        string
 	disableAnek     bool
 	disableSwearing bool
 	disableLLM      bool
@@ -50,6 +51,7 @@ func loadConfig(args []string) (*config, error) {
 	geminiModel := fs.String("gemini-model", os.Getenv("GEMINI_MODEL"), "Gemini model used for the @mention LLM feature, defaults to gemini-3.6-flash (env GEMINI_MODEL)")
 	hfAPIKey := fs.String("hf-api-key", os.Getenv("HF_API_KEY"), "optional Hugging Face API token; used as a fallback for the @mention LLM feature when Gemini is unavailable, or as the primary provider when Gemini isn't configured (env HF_API_KEY)")
 	hfModel := fs.String("hf-model", os.Getenv("HF_MODEL"), "Hugging Face model used for the @mention LLM feature, defaults to meta-llama/Llama-3.3-70B-Instruct (env HF_MODEL)")
+	logLevel := fs.String("log-level", envOrDefault("LOG_LEVEL", "warn"), "log level: trace, debug or warn (env LOG_LEVEL)")
 	disableAnek := fs.Bool("disable-anek", envBool("DISABLE_ANEK"), "disable the \"анек!\" joke trigger and inline joke queries (env DISABLE_ANEK)")
 	disableSwearing := fs.Bool("disable-swearing", envBool("DISABLE_SWEARING"), "disable reacting to swear words (env DISABLE_SWEARING)")
 	disableLLM := fs.Bool("disable-llm", envBool("DISABLE_LLM"), "disable the @mention LLM feature even if -gemini-api-key or -hf-api-key is set (env DISABLE_LLM)")
@@ -69,6 +71,7 @@ func loadConfig(args []string) (*config, error) {
 		geminiModel:     *geminiModel,
 		hfAPIKey:        *hfAPIKey,
 		hfModel:         *hfModel,
+		logLevel:        *logLevel,
 		disableAnek:     *disableAnek,
 		disableSwearing: *disableSwearing,
 		disableLLM:      *disableLLM,
@@ -79,6 +82,9 @@ func loadConfig(args []string) (*config, error) {
 	}
 	if cfg.mode != "webhook" && cfg.mode != "poll" {
 		return nil, fmt.Errorf("invalid mode %q: must be %q or %q", cfg.mode, "webhook", "poll")
+	}
+	if _, err := anekbot.ParseLogLevel(cfg.logLevel); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
@@ -101,6 +107,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	logLevel, err := anekbot.ParseLogLevel(cfg.logLevel)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	anekbot.SetLogLevel(logLevel)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

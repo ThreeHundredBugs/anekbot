@@ -14,7 +14,7 @@ import (
 
 const (
 	defaultHuggingFaceBaseURL = "https://router.huggingface.co/v1"
-	defaultHuggingFaceModel   = "meta-llama/Llama-3.3-70B-Instruct"
+	defaultHuggingFaceModel   = "deepseek-ai/DeepSeek-V4.1-Flash"
 	huggingFaceRequestTimeout = 30 * time.Second
 )
 
