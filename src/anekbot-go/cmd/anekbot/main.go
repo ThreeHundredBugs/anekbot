@@ -27,6 +27,8 @@ type config struct {
 	webhookPath    string
 	webhookSecret  string
 	swearWordsFile string
+	geminiAPIKey   string
+	geminiModel    string
 }
 
 func loadConfig(args []string) (*config, error) {
@@ -38,6 +40,8 @@ func loadConfig(args []string) (*config, error) {
 	webhookPath := fs.String("webhook-path", envOrDefault("WEBHOOK_PATH", "/webhook"), "HTTP path Telegram will POST updates to (env WEBHOOK_PATH)")
 	webhookSecret := fs.String("webhook-secret", os.Getenv("WEBHOOK_SECRET_TOKEN"), "optional secret validated against X-Telegram-Bot-Api-Secret-Token (env WEBHOOK_SECRET_TOKEN)")
 	swearWordsFile := fs.String("swearwords-file", os.Getenv("SWEARWORDS_FILE"), "optional path to an extra swear word list (one word per line) merged with the built-in list (env SWEARWORDS_FILE)")
+	geminiAPIKey := fs.String("gemini-api-key", os.Getenv("GEMINI_API_KEY"), "optional Gemini API key; when set, @mentioning the bot asks Gemini and replies with the answer (env GEMINI_API_KEY)")
+	geminiModel := fs.String("gemini-model", os.Getenv("GEMINI_MODEL"), "Gemini model used for the @mention LLM feature, defaults to gemini-3.6-flash (env GEMINI_MODEL)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -50,6 +54,8 @@ func loadConfig(args []string) (*config, error) {
 		webhookPath:    *webhookPath,
 		webhookSecret:  *webhookSecret,
 		swearWordsFile: *swearWordsFile,
+		geminiAPIKey:   *geminiAPIKey,
+		geminiModel:    *geminiModel,
 	}
 
 	if cfg.botToken == "" {
@@ -82,7 +88,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("swearing handler: %v", err)
 	}
-	dispatcher := anekbot.NewDispatcher(anekbot.NewAnekHandler(), swearing)
+	dispatcher := anekbot.NewDispatcher(anekbot.NewAnekHandler(), swearing, nil)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -96,6 +102,14 @@ func main() {
 	b, err := bot.New(cfg.botToken, opts...)
 	if err != nil {
 		log.Fatalf("create bot: %v", err)
+	}
+
+	if cfg.geminiAPIKey != "" {
+		me, err := b.GetMe(ctx)
+		if err != nil {
+			log.Fatalf("get bot info: %v", err)
+		}
+		dispatcher.SetGemini(anekbot.NewGeminiHandler(cfg.geminiAPIKey, cfg.geminiModel, me.Username))
 	}
 
 	switch cfg.mode {
