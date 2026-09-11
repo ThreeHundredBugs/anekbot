@@ -22,6 +22,8 @@ const (
 	defaultGeminiModel   = "gemini-3.6-flash"
 	geminiRequestTimeout = 30 * time.Second
 	geminiSystemPrompt   = "You are a helpful assistant replying in a Telegram chat. Keep answers concise. " +
+		"This is a one-shot reply: the user cannot follow up or continue the conversation, so make your answer " +
+		"self-contained and don't ask clarifying questions or offer to elaborate further. " +
 		"Reply in Russian by default, unless the user's message is clearly written in another language, in which " +
 		"case reply in that language instead. Don't format the message unless needed. " +
 		"If you need to format, reply as Telegram HTML: only <b>, <i>, <u>, <s>, <code>, <pre> and <a href=\"...\"> tags are " +
