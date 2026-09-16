@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -81,6 +82,23 @@ func TestHuggingFaceProvider_Ask_APIError(t *testing.T) {
 	_, err := p.Ask(context.Background(), "are you ok")
 	if err == nil {
 		t.Fatal("expected an error on a non-200 response")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error = %q, want it to contain %q", err, "boom")
+	}
+}
+
+func TestHuggingFaceProvider_Ask_APIError_StringShaped(t *testing.T) {
+	// Some Hugging Face router failures report "error" as a plain string
+	// instead of an {"message": "..."} object.
+	p, _ := newTestHuggingFaceProvider(t, http.StatusInternalServerError, `{"error":"boom"}`)
+
+	_, err := p.Ask(context.Background(), "are you ok")
+	if err == nil {
+		t.Fatal("expected an error on a non-200 response")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error = %q, want it to contain %q", err, "boom")
 	}
 }
 

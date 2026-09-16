@@ -28,13 +28,32 @@ type hfRequest struct {
 	Messages []hfMessage `json:"messages"`
 }
 
+// hfError accepts the two shapes the Hugging Face router uses for errors:
+// a plain string, or an object with a "message" field.
+type hfError struct {
+	Message string
+}
+
+func (e *hfError) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &e.Message); err == nil {
+		return nil
+	}
+
+	var asObject struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &asObject); err != nil {
+		return err
+	}
+	e.Message = asObject.Message
+	return nil
+}
+
 type hfResponse struct {
 	Choices []struct {
 		Message hfMessage `json:"message"`
 	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+	Error *hfError `json:"error"`
 }
 
 type huggingFaceProvider struct {

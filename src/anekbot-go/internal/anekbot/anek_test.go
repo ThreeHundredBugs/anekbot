@@ -2,6 +2,7 @@ package anekbot
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -193,6 +194,203 @@ func TestAnekHandler_HandleInline_NoInlineQuery(t *testing.T) {
 
 	if len(sender.inlineAnswers) != 0 {
 		t.Errorf("expected no AnswerInlineQuery call when InlineQuery is nil, got %d", len(sender.inlineAnswers))
+	}
+}
+
+func TestAnekHandler_HandleInline_WithQuery_ShowsPlaceholder(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	update := &models.Update{InlineQuery: &models.InlineQuery{ID: "query-1", Query: "  про  котов  "}}
+
+	h.HandleInline(context.Background(), sender, update)
+
+	if len(sender.inlineAnswers) != 1 {
+		t.Fatalf("expected 1 AnswerInlineQuery call, got %d", len(sender.inlineAnswers))
+	}
+	answer := sender.inlineAnswers[0]
+	if answer.CacheTime != inlineAICacheSeconds {
+		t.Errorf("cache time = %d, want %d", answer.CacheTime, inlineAICacheSeconds)
+	}
+	if len(answer.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(answer.Results))
+	}
+
+	article, ok := answer.Results[0].(*models.InlineQueryResultArticle)
+	if !ok {
+		t.Fatalf("result type = %T, want *models.InlineQueryResultArticle", answer.Results[0])
+	}
+	if article.ID != aiJokeResultID {
+		t.Errorf("result id = %q, want %q", article.ID, aiJokeResultID)
+	}
+
+	wantTitle := "Сгенерировать анек с помощью ИИ на тему про котов"
+	if article.Title != wantTitle {
+		t.Errorf("title = %q, want %q", article.Title, wantTitle)
+	}
+
+	// The LLM must not be consulted while the user is still typing; the message
+	// content sent immediately on tap is just a placeholder, filled in later by
+	// HandleChosenInlineResult once Telegram confirms the result was chosen.
+	content, ok := article.InputMessageContent.(models.InputTextMessageContent)
+	if !ok {
+		t.Fatalf("input message content type = %T, want models.InputTextMessageContent", article.InputMessageContent)
+	}
+	if content.MessageText != aiJokeGeneratingMessage {
+		t.Errorf("message text = %q, want placeholder %q", content.MessageText, aiJokeGeneratingMessage)
+	}
+
+	// Telegram only assigns an inline_message_id (needed later to edit the message)
+	// to results sent with an inline keyboard attached, so one must be present.
+	markup, ok := article.ReplyMarkup.(*models.InlineKeyboardMarkup)
+	if !ok {
+		t.Fatalf("reply markup type = %T, want *models.InlineKeyboardMarkup", article.ReplyMarkup)
+	}
+	if len(markup.InlineKeyboard) != 1 || len(markup.InlineKeyboard[0]) != 1 {
+		t.Fatalf("inline keyboard = %+v, want a single button", markup.InlineKeyboard)
+	}
+	if got := markup.InlineKeyboard[0][0].CallbackData; got != aiJokePendingCallbackData {
+		t.Errorf("callback data = %q, want %q", got, aiJokePendingCallbackData)
+	}
+}
+
+func TestAnekHandler_HandleChosenInlineResult_GeneratesAndEditsJoke(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "смешной анекдот"}, nil)
+
+	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID:        aiJokeResultID,
+		Query:           "котов",
+		InlineMessageID: "inline-msg-1",
+	}}
+
+	h.HandleChosenInlineResult(context.Background(), sender, update, llm)
+
+	if len(sender.editedMessages) != 1 {
+		t.Fatalf("expected 1 EditMessageText call, got %d", len(sender.editedMessages))
+	}
+	edited := sender.editedMessages[0]
+	if edited.InlineMessageID != "inline-msg-1" {
+		t.Errorf("inline message id = %q, want %q", edited.InlineMessageID, "inline-msg-1")
+	}
+	if edited.Text != "смешной анекдот" {
+		t.Errorf("text = %q, want %q", edited.Text, "смешной анекдот")
+	}
+
+	// The pending-button keyboard must be cleared once the real joke is in.
+	markup, ok := edited.ReplyMarkup.(*models.InlineKeyboardMarkup)
+	if !ok {
+		t.Fatalf("reply markup type = %T, want *models.InlineKeyboardMarkup", edited.ReplyMarkup)
+	}
+	if len(markup.InlineKeyboard) != 0 {
+		t.Errorf("inline keyboard = %+v, want it cleared", markup.InlineKeyboard)
+	}
+}
+
+func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenLLMNil(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID:        aiJokeResultID,
+		Query:           "котов",
+		InlineMessageID: "inline-msg-1",
+	}}
+
+	h.HandleChosenInlineResult(context.Background(), sender, update, nil)
+
+	if len(sender.editedMessages) != 1 {
+		t.Fatalf("expected 1 EditMessageText call, got %d", len(sender.editedMessages))
+	}
+	if got := sender.editedMessages[0].Text; got != llmUnavailableMessage {
+		t.Errorf("text = %q, want %q", got, llmUnavailableMessage)
+	}
+}
+
+func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenProviderFails(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+	llm := NewLLMHandler("anekbot", &fakeLLMProvider{err: errors.New("down")}, nil)
+
+	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID:        aiJokeResultID,
+		Query:           "котов",
+		InlineMessageID: "inline-msg-1",
+	}}
+
+	h.HandleChosenInlineResult(context.Background(), sender, update, llm)
+
+	if len(sender.editedMessages) != 1 {
+		t.Fatalf("expected 1 EditMessageText call, got %d", len(sender.editedMessages))
+	}
+	if got := sender.editedMessages[0].Text; got != llmUnavailableMessage {
+		t.Errorf("text = %q, want %q", got, llmUnavailableMessage)
+	}
+}
+
+func TestAnekHandler_HandleChosenInlineResult_IgnoresOtherResults(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "смешной анекдот"}, nil)
+
+	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID:        "0", // one of the random-joke results, not the AI one
+		InlineMessageID: "inline-msg-1",
+	}}
+
+	h.HandleChosenInlineResult(context.Background(), sender, update, llm)
+
+	if len(sender.editedMessages) != 0 {
+		t.Errorf("expected no EditMessageText call for a non-AI result, got %d", len(sender.editedMessages))
+	}
+}
+
+func TestAnekHandler_HandleChosenInlineResult_NoUpdate(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{}, nil)
+
+	if len(sender.editedMessages) != 0 {
+		t.Errorf("expected no EditMessageText call when ChosenInlineResult is nil, got %d", len(sender.editedMessages))
+	}
+}
+
+func TestAnekHandler_HandleCallback_AcksPendingButton(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	update := &models.Update{CallbackQuery: &models.CallbackQuery{ID: "cb-1", Data: aiJokePendingCallbackData}}
+
+	h.HandleCallback(context.Background(), sender, update)
+
+	if len(sender.callbackAnswers) != 1 || sender.callbackAnswers[0].CallbackQueryID != "cb-1" {
+		t.Fatalf("expected AnswerCallbackQuery for cb-1, got %+v", sender.callbackAnswers)
+	}
+}
+
+func TestAnekHandler_HandleCallback_IgnoresUnrelatedCallback(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	update := &models.Update{CallbackQuery: &models.CallbackQuery{ID: "cb-1", Data: "some_other_action"}}
+
+	h.HandleCallback(context.Background(), sender, update)
+
+	if len(sender.callbackAnswers) != 0 {
+		t.Errorf("expected an unrelated callback to be ignored, got %d answers", len(sender.callbackAnswers))
+	}
+}
+
+func TestAnekHandler_HandleCallback_NoCallbackQuery(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	h.HandleCallback(context.Background(), sender, &models.Update{})
+
+	if len(sender.callbackAnswers) != 0 {
+		t.Errorf("expected no calls when CallbackQuery is nil, got %d", len(sender.callbackAnswers))
 	}
 }
 
