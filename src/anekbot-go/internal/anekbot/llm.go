@@ -59,18 +59,7 @@ func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.U
 	}
 	logDebugf("llm handler: answering question in chat_id=%d", msg.Chat.ID)
 
-	provider := h.primary
-	answer, err := provider.Ask(ctx, question)
-	if err != nil {
-		logWarnf("llm handler: primary provider: %v", err)
-		if h.fallback != nil {
-			provider = h.fallback
-			answer, err = provider.Ask(ctx, question)
-			if err != nil {
-				logWarnf("llm handler: fallback provider: %v", err)
-			}
-		}
-	}
+	answer, providerName, err := h.Ask(ctx, question)
 	if err != nil {
 		if _, sendErr := sender.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,
@@ -82,7 +71,7 @@ func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.U
 		return
 	}
 
-	signature := fmt.Sprintf("\n\nby %s", provider.Name())
+	signature := fmt.Sprintf("\n\nby %s", providerName)
 	answer = truncateToRunes(answer, telegramMessageMaxRunes-len([]rune(signature))) + signature
 
 	_, err = sender.SendMessage(ctx, &bot.SendMessageParams{
@@ -104,6 +93,25 @@ func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.U
 	}); err != nil {
 		logWarnf("llm handler: send plain-text fallback: %v", err)
 	}
+}
+
+func (h *LLMHandler) Ask(ctx context.Context, question string) (answer, providerName string, err error) {
+	provider := h.primary
+	answer, err = provider.Ask(ctx, question)
+	if err != nil {
+		logWarnf("llm handler: primary provider: %v", err)
+		if h.fallback != nil {
+			provider = h.fallback
+			answer, err = provider.Ask(ctx, question)
+			if err != nil {
+				logWarnf("llm handler: fallback provider: %v", err)
+			}
+		}
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return answer, provider.Name(), nil
 }
 
 func (h *LLMHandler) extractQuestion(text string) (question string, ok bool) {

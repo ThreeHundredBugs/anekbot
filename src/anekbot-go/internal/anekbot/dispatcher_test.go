@@ -139,6 +139,90 @@ func TestDispatch_InlineQuery_SkipsDisabledAnek(t *testing.T) {
 	}
 }
 
+func TestDispatch_InlineQuery_WithQuery_ShowsPlaceholderWithoutCallingLLM(t *testing.T) {
+	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	primary := &fakeLLMProvider{answer: "42"}
+	llm := NewLLMHandler("anekbot", primary, nil)
+	d := NewDispatcher(anek, nil, llm, nil)
+
+	sender := &fakeSender{}
+	update := &models.Update{InlineQuery: &models.InlineQuery{ID: "q1", Query: "котов"}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.inlineAnswers) != 1 {
+		t.Fatalf("expected 1 AnswerInlineQuery call, got %d", len(sender.inlineAnswers))
+	}
+	if primary.calls != 0 {
+		t.Errorf("expected the LLM to not be called while answering the inline query, got %d calls", primary.calls)
+	}
+	article := sender.inlineAnswers[0].Results[0].(*models.InlineQueryResultArticle)
+	content := article.InputMessageContent.(models.InputTextMessageContent)
+	if content.MessageText != aiJokeGeneratingMessage {
+		t.Errorf("message text = %q, want placeholder %q", content.MessageText, aiJokeGeneratingMessage)
+	}
+}
+
+func TestDispatch_ChosenInlineResult_RunsAnekHandlerWithLLM(t *testing.T) {
+	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
+	d := NewDispatcher(anek, nil, llm, nil)
+
+	sender := &fakeSender{}
+	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID:        aiJokeResultID,
+		Query:           "котов",
+		InlineMessageID: "inline-msg-1",
+	}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.editedMessages) != 1 {
+		t.Fatalf("expected the anek handler to edit 1 message, got %d", len(sender.editedMessages))
+	}
+	if got := sender.editedMessages[0].Text; got != "42" {
+		t.Errorf("edited text = %q, want %q", got, "42")
+	}
+}
+
+func TestDispatch_ChosenInlineResult_SkipsDisabledAnek(t *testing.T) {
+	d := NewDispatcher(nil, nil, nil, nil)
+	sender := &fakeSender{}
+	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{ResultID: aiJokeResultID}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.editedMessages) != 0 {
+		t.Errorf("expected a disabled anek handler to make no calls, got %d", len(sender.editedMessages))
+	}
+}
+
+func TestDispatch_CallbackQuery_RunsAnekHandler(t *testing.T) {
+	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	d := NewDispatcher(anek, nil, nil, nil)
+
+	sender := &fakeSender{}
+	update := &models.Update{CallbackQuery: &models.CallbackQuery{ID: "cb-1", Data: aiJokePendingCallbackData}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.callbackAnswers) != 1 || sender.callbackAnswers[0].CallbackQueryID != "cb-1" {
+		t.Fatalf("expected the anek handler to answer the callback query, got %+v", sender.callbackAnswers)
+	}
+}
+
+func TestDispatch_CallbackQuery_SkipsDisabledAnek(t *testing.T) {
+	d := NewDispatcher(nil, nil, nil, nil)
+	sender := &fakeSender{}
+	update := &models.Update{CallbackQuery: &models.CallbackQuery{ID: "cb-1", Data: aiJokePendingCallbackData}}
+
+	d.Dispatch(context.Background(), sender, update)
+
+	if len(sender.callbackAnswers) != 0 {
+		t.Errorf("expected a disabled anek handler to make no calls, got %d", len(sender.callbackAnswers))
+	}
+}
+
 func TestDispatch_InlineQuery_DoesNotRunMessageHandlers(t *testing.T) {
 	d := newTestDispatcher(t)
 	sender := &fakeSender{}

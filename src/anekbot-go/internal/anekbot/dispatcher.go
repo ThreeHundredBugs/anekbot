@@ -13,6 +13,8 @@ type Sender interface {
 	SendMessage(ctx context.Context, params *bot.SendMessageParams) (*models.Message, error)
 	SetMessageReaction(ctx context.Context, params *bot.SetMessageReactionParams) (bool, error)
 	AnswerInlineQuery(ctx context.Context, params *bot.AnswerInlineQueryParams) (bool, error)
+	EditMessageText(ctx context.Context, params *bot.EditMessageTextParams) (*models.Message, error)
+	AnswerCallbackQuery(ctx context.Context, params *bot.AnswerCallbackQueryParams) (bool, error)
 }
 
 type Handler interface {
@@ -77,6 +79,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		if d.anek != nil {
 			logDebugf("dispatcher: firing %s inline handler", d.anek.Name())
 			d.anek.HandleInline(ctx, sender, update)
+		}
+	case update.ChosenInlineResult != nil:
+		logDebugf("dispatcher: chosen inline result from user=%s", userLabel(&update.ChosenInlineResult.From))
+		if d.anek != nil {
+			logDebugf("dispatcher: firing %s chosen-inline-result handler", d.anek.Name())
+			d.anek.HandleChosenInlineResult(ctx, sender, update, d.llm)
+		}
+	case update.CallbackQuery != nil:
+		logDebugf("dispatcher: callback query from user=%s", userLabel(&update.CallbackQuery.From))
+		if d.anek != nil {
+			logDebugf("dispatcher: firing %s callback handler", d.anek.Name())
+			d.anek.HandleCallback(ctx, sender, update)
 		}
 	}
 }
