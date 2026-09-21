@@ -27,7 +27,7 @@ const (
 	inlineSuggestionCount = 3
 	inlineTitleMaxRunes   = 60
 
-	inlineAITitlePrefix  = "Сгенерировать анек с помощью ИИ на тему "
+	inlineAITitlePrefix  = "Сгенерировать ИИ-анек на тему "
 	inlineAITextMaxRunes = 100
 	inlineAICacheSeconds = 120
 	aiJokeResultID       = "ai-joke"
@@ -49,6 +49,11 @@ type AnekHandler struct {
 	client    *http.Client
 	baseURL   string
 	randFloat func() float64
+	promos    *Promotions
+	llm       *LLM
+
+	inlineDisabled  bool
+	aiJokesDisabled bool
 }
 
 func NewAnekHandler() *AnekHandler {
@@ -57,6 +62,19 @@ func NewAnekHandler() *AnekHandler {
 		baseURL:   defaultBaseURL,
 		randFloat: rand.Float64,
 	}
+}
+
+func (h *AnekHandler) SetPromotions(p *Promotions) {
+	h.promos = p
+}
+
+func (h *AnekHandler) SetLLM(llm *LLM) {
+	h.llm = llm
+}
+
+func (h *AnekHandler) SetInline(enabled, aiJokes bool) {
+	h.inlineDisabled = !enabled
+	h.aiJokesDisabled = !aiJokes
 }
 
 func (h *AnekHandler) Name() string {
@@ -90,13 +108,13 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 }
 
 func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *models.Update) {
-	if update.InlineQuery == nil {
+	if update.InlineQuery == nil || h.inlineDisabled {
 		return
 	}
 	query := update.InlineQuery
 
 	topic := strings.Join(strings.Fields(query.Query), " ")
-	if topic != "" {
+	if topic != "" && !h.aiJokesDisabled {
 		h.answerAIJokePlaceholderInline(ctx, sender, query, topic)
 		return
 	}
@@ -126,6 +144,7 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 			ID:                  strconv.Itoa(i),
 			Title:               inlineTitle(joke),
 			InputMessageContent: models.InputTextMessageContent{MessageText: joke},
+			ReplyMarkup:         h.promos.Keyboard(),
 		})
 	}
 
@@ -171,8 +190,8 @@ func (h *AnekHandler) answerAIJokePlaceholderInline(ctx context.Context, sender 
 // placeholder result from answerAIJokePlaceholderInline, then edits it in place.
 // This relies on Telegram delivering chosen_inline_result updates, which requires
 // inline feedback to be enabled for the bot via BotFather's /setinlinefeedback.
-func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sender, update *models.Update, llm *LLMHandler) {
-	if update.ChosenInlineResult == nil {
+func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sender, update *models.Update) {
+	if update.ChosenInlineResult == nil || h.aiJokesDisabled {
 		return
 	}
 	chosen := update.ChosenInlineResult
@@ -185,13 +204,13 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 		return
 	}
 
-	if llm == nil {
+	if h.llm == nil {
 		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
 		return
 	}
 
 	logDebugf("anek handler: generating AI joke for topic %q", topic)
-	joke, _, err := llm.Ask(ctx, fmt.Sprintf(aiJokePromptTemplate, topic))
+	joke, _, err := h.llm.Ask(ctx, fmt.Sprintf(aiJokePromptTemplate, topic))
 	if err != nil {
 		logWarnf("anek handler: generate AI joke: %v", err)
 		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
@@ -202,11 +221,14 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 }
 
 func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inlineMessageID, text string, tryHTML bool) {
-	// Clear the pending-button keyboard now that the real content has arrived.
+	markup := h.promos.Keyboard()
+	if markup == nil {
+		markup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}}
+	}
 	params := &bot.EditMessageTextParams{
 		InlineMessageID: inlineMessageID,
 		Text:            text,
-		ReplyMarkup:     &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}},
+		ReplyMarkup:     markup,
 	}
 	if tryHTML {
 		params.ParseMode = models.ParseModeHTML
@@ -224,11 +246,12 @@ func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inli
 	}
 }
 
-// HandleCallback acks taps on the transient pending-generation button so the
+// HandleCallback acks taps on the transient pending-generation button and on link-less promotion buttons so the
 // Telegram client doesn't leave the user staring at a stuck loading spinner;
 // the actual joke arrives via HandleChosenInlineResult regardless of any tap.
 func (h *AnekHandler) HandleCallback(ctx context.Context, sender Sender, update *models.Update) {
-	if update.CallbackQuery == nil || update.CallbackQuery.Data != aiJokePendingCallbackData {
+	if update.CallbackQuery == nil ||
+		(update.CallbackQuery.Data != aiJokePendingCallbackData && update.CallbackQuery.Data != promotionCallbackData) {
 		return
 	}
 	if _, err := sender.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{

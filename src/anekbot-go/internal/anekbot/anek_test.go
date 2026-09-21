@@ -224,7 +224,7 @@ func TestAnekHandler_HandleInline_WithQuery_ShowsPlaceholder(t *testing.T) {
 		t.Errorf("result id = %q, want %q", article.ID, aiJokeResultID)
 	}
 
-	wantTitle := "Сгенерировать анек с помощью ИИ на тему про котов"
+	wantTitle := "Сгенерировать ИИ-анек на тему про котов"
 	if article.Title != wantTitle {
 		t.Errorf("title = %q, want %q", article.Title, wantTitle)
 	}
@@ -257,7 +257,7 @@ func TestAnekHandler_HandleInline_WithQuery_ShowsPlaceholder(t *testing.T) {
 func TestAnekHandler_HandleChosenInlineResult_GeneratesAndEditsJoke(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}
-	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "смешной анекдот"}, nil)
+	h.SetLLM(NewLLM(&fakeLLMProvider{answer: "смешной анекдот"}))
 
 	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID:        aiJokeResultID,
@@ -265,7 +265,7 @@ func TestAnekHandler_HandleChosenInlineResult_GeneratesAndEditsJoke(t *testing.T
 		InlineMessageID: "inline-msg-1",
 	}}
 
-	h.HandleChosenInlineResult(context.Background(), sender, update, llm)
+	h.HandleChosenInlineResult(context.Background(), sender, update)
 
 	if len(sender.editedMessages) != 1 {
 		t.Fatalf("expected 1 EditMessageText call, got %d", len(sender.editedMessages))
@@ -298,7 +298,7 @@ func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenLLMNil(t *testing.T
 		InlineMessageID: "inline-msg-1",
 	}}
 
-	h.HandleChosenInlineResult(context.Background(), sender, update, nil)
+	h.HandleChosenInlineResult(context.Background(), sender, update)
 
 	if len(sender.editedMessages) != 1 {
 		t.Fatalf("expected 1 EditMessageText call, got %d", len(sender.editedMessages))
@@ -311,7 +311,7 @@ func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenLLMNil(t *testing.T
 func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenProviderFails(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}
-	llm := NewLLMHandler("anekbot", &fakeLLMProvider{err: errors.New("down")}, nil)
+	h.SetLLM(NewLLM(&fakeLLMProvider{err: errors.New("down")}))
 
 	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID:        aiJokeResultID,
@@ -319,7 +319,7 @@ func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenProviderFails(t *te
 		InlineMessageID: "inline-msg-1",
 	}}
 
-	h.HandleChosenInlineResult(context.Background(), sender, update, llm)
+	h.HandleChosenInlineResult(context.Background(), sender, update)
 
 	if len(sender.editedMessages) != 1 {
 		t.Fatalf("expected 1 EditMessageText call, got %d", len(sender.editedMessages))
@@ -332,14 +332,14 @@ func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenProviderFails(t *te
 func TestAnekHandler_HandleChosenInlineResult_IgnoresOtherResults(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}
-	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "смешной анекдот"}, nil)
+	h.SetLLM(NewLLM(&fakeLLMProvider{answer: "смешной анекдот"}))
 
 	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID:        "0", // one of the random-joke results, not the AI one
 		InlineMessageID: "inline-msg-1",
 	}}
 
-	h.HandleChosenInlineResult(context.Background(), sender, update, llm)
+	h.HandleChosenInlineResult(context.Background(), sender, update)
 
 	if len(sender.editedMessages) != 0 {
 		t.Errorf("expected no EditMessageText call for a non-AI result, got %d", len(sender.editedMessages))
@@ -350,7 +350,7 @@ func TestAnekHandler_HandleChosenInlineResult_NoUpdate(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}
 
-	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{}, nil)
+	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{})
 
 	if len(sender.editedMessages) != 0 {
 		t.Errorf("expected no EditMessageText call when ChosenInlineResult is nil, got %d", len(sender.editedMessages))
@@ -404,5 +404,37 @@ func TestInlineTitle_TruncatesLongJokes(t *testing.T) {
 	}
 	if !strings.HasSuffix(title, "…") {
 		t.Errorf("title = %q, want it truncated with a trailing ellipsis", title)
+	}
+}
+
+func TestAnekHandler_SetInline_DisabledIgnoresInlineQueries(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	h.SetInline(false, true)
+	sender := &fakeSender{}
+
+	h.HandleInline(context.Background(), sender, &models.Update{InlineQuery: &models.InlineQuery{ID: "q"}})
+
+	if len(sender.inlineAnswers) != 0 {
+		t.Errorf("expected no answer with inline disabled, got %d", len(sender.inlineAnswers))
+	}
+}
+
+func TestAnekHandler_SetInline_AIJokesDisabledFallsBackToRegularJokes(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	h.SetInline(true, false)
+	sender := &fakeSender{}
+
+	h.HandleInline(context.Background(), sender, &models.Update{InlineQuery: &models.InlineQuery{ID: "q", Query: "cats"}})
+
+	if len(sender.inlineAnswers) != 1 || len(sender.inlineAnswers[0].Results) != inlineSuggestionCount {
+		t.Fatalf("expected regular joke suggestions, got %+v", sender.inlineAnswers)
+	}
+
+	h.SetLLM(NewLLM(&fakeLLMProvider{answer: "x"}))
+	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID: aiJokeResultID, Query: "cats", InlineMessageID: "m",
+	}})
+	if len(sender.editedMessages) != 0 {
+		t.Error("AI joke must not be generated when ai_jokes is disabled")
 	}
 }

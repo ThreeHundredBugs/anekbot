@@ -42,8 +42,8 @@ func TestDispatch_Message_RunsLLMHandlerWhenConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSwearingHandler: %v", err)
 	}
-	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
-	d := NewDispatcher(anek, swearing, llm, nil)
+	questions := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{answer: "42"}))
+	d := NewDispatcher(anek, swearing, questions, nil)
 
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
@@ -65,8 +65,8 @@ func TestDispatch_Message_RunsLLMAndSwearingHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSwearingHandler: %v", err)
 	}
-	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
-	d := NewDispatcher(anek, swearing, llm, nil)
+	questions := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{answer: "42"}))
+	d := NewDispatcher(anek, swearing, questions, nil)
 
 	sender := &fakeSender{}
 	update := &models.Update{Message: &models.Message{
@@ -142,8 +142,8 @@ func TestDispatch_InlineQuery_SkipsDisabledAnek(t *testing.T) {
 func TestDispatch_InlineQuery_WithQuery_ShowsPlaceholderWithoutCallingLLM(t *testing.T) {
 	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	primary := &fakeLLMProvider{answer: "42"}
-	llm := NewLLMHandler("anekbot", primary, nil)
-	d := NewDispatcher(anek, nil, llm, nil)
+	anek.SetLLM(NewLLM(primary))
+	d := NewDispatcher(anek, nil, nil, nil)
 
 	sender := &fakeSender{}
 	update := &models.Update{InlineQuery: &models.InlineQuery{ID: "q1", Query: "котов"}}
@@ -165,8 +165,8 @@ func TestDispatch_InlineQuery_WithQuery_ShowsPlaceholderWithoutCallingLLM(t *tes
 
 func TestDispatch_ChosenInlineResult_RunsAnekHandlerWithLLM(t *testing.T) {
 	anek, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
-	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "42"}, nil)
-	d := NewDispatcher(anek, nil, llm, nil)
+	anek.SetLLM(NewLLM(&fakeLLMProvider{answer: "42"}))
+	d := NewDispatcher(anek, nil, nil, nil)
 
 	sender := &fakeSender{}
 	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{

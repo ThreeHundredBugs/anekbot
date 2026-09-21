@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -22,63 +23,153 @@ import (
 const shutdownTimeout = 5 * time.Second
 
 type config struct {
-	botToken        string
-	mode            string
-	port            string
-	webhookPath     string
-	webhookSecret   string
-	swearWordsFile  string
-	geminiAPIKey    string
-	geminiModel     string
-	hfAPIKey        string
-	hfModel         string
-	logLevel        string
-	disableAnek     bool
-	disableSwearing bool
-	disableLLM      bool
+	botToken      string
+	mode          string
+	logLevel      string
+	port          string
+	webhookPath   string
+	webhookSecret string
+
+	// llmProviders are tried in order; empty means no LLM is available.
+	llmProviders []anekbot.LLMProvider
+
+	anekEnabled       bool
+	inlineEnabled     bool
+	aiJokesEnabled    bool
+	promotions        *anekbot.Promotions
+	questionsEnabled  bool
+	swearingEnabled   bool
+	swearingWordsFile string
+}
+
+type fileConfig struct {
+	Bot struct {
+		Token    string `json:"token"`
+		Mode     string `json:"mode"`
+		LogLevel string `json:"log_level"`
+	} `json:"bot"`
+	Server struct {
+		Port          string `json:"port"`
+		WebhookPath   string `json:"webhook_path"`
+		WebhookSecret string `json:"webhook_secret"`
+	} `json:"server"`
+	LLM struct {
+		Providers []providerConfig `json:"providers"`
+	} `json:"llm"`
+	Anek struct {
+		Enabled *bool `json:"enabled"`
+		Inline  struct {
+			Enabled    *bool                     `json:"enabled"`
+			AIJokes    *bool                     `json:"ai_jokes"`
+			Promotions *anekbot.PromotionsConfig `json:"promotions"`
+		} `json:"inline"`
+	} `json:"anek"`
+	Questions struct {
+		Enabled *bool `json:"enabled"`
+	} `json:"questions"`
+	Swearing struct {
+		Enabled   *bool  `json:"enabled"`
+		WordsFile string `json:"words_file"`
+	} `json:"swearing"`
+}
+
+type providerConfig struct {
+	Type  string `json:"type"`
+	Model string `json:"model"`
+	// APIKeyEnv overrides which env var holds the key; defaults depend on Type.
+	APIKeyEnv string `json:"api_key_env"`
+}
+
+var defaultAPIKeyEnv = map[string]string{
+	"gemini":      "GEMINI_API_KEY",
+	"huggingface": "HF_API_KEY",
+}
+
+func buildProvider(pc providerConfig) (anekbot.LLMProvider, error) {
+	defEnv, ok := defaultAPIKeyEnv[pc.Type]
+	if !ok {
+		return nil, fmt.Errorf("llm.providers: unknown type %q: must be %q or %q", pc.Type, "gemini", "huggingface")
+	}
+	keyEnv := or(pc.APIKeyEnv, defEnv)
+	key := os.Getenv(keyEnv)
+	if key == "" {
+		log.Printf("llm provider %s skipped: env var %s is empty", pc.Type, keyEnv)
+		return nil, nil
+	}
+	if pc.Type == "gemini" {
+		return anekbot.NewGeminiProvider(key, pc.Model), nil
+	}
+	return anekbot.NewHuggingFaceProvider(key, pc.Model), nil
+}
+
+func loadFileConfig(path string) (*fileConfig, error) {
+	if path == "" {
+		return &fileConfig{}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var fc fileConfig
+	if err := dec.Decode(&fc); err != nil {
+		return nil, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	return &fc, nil
+}
+
+// enabled reports whether an optional "enabled"-style setting is on; unset means on.
+func enabled(v *bool) bool {
+	return v == nil || *v
 }
 
 func loadConfig(args []string) (*config, error) {
 	fs := flag.NewFlagSet("anekbot", flag.ContinueOnError)
-
-	botToken := fs.String("bot-token", os.Getenv("BOT_TOKEN"), "Telegram bot token (env BOT_TOKEN)")
-	mode := fs.String("mode", envOrDefault("ANEKBOT_MODE", "webhook"), "run mode: webhook or poll (env ANEKBOT_MODE)")
-	port := fs.String("port", envOrDefault("PORT", "8080"), "HTTP port to listen on in webhook mode (env PORT)")
-	webhookPath := fs.String("webhook-path", envOrDefault("WEBHOOK_PATH", "/webhook"), "HTTP path Telegram will POST updates to (env WEBHOOK_PATH)")
-	webhookSecret := fs.String("webhook-secret", os.Getenv("WEBHOOK_SECRET_TOKEN"), "optional secret validated against X-Telegram-Bot-Api-Secret-Token (env WEBHOOK_SECRET_TOKEN)")
-	swearWordsFile := fs.String("swearwords-file", os.Getenv("SWEARWORDS_FILE"), "optional path to an extra swear word list (one word per line) merged with the built-in list (env SWEARWORDS_FILE)")
-	geminiAPIKey := fs.String("gemini-api-key", os.Getenv("GEMINI_API_KEY"), "optional Gemini API key; when set, @mentioning the bot asks Gemini and replies with the answer (env GEMINI_API_KEY)")
-	geminiModel := fs.String("gemini-model", os.Getenv("GEMINI_MODEL"), "Gemini model used for the @mention LLM feature, defaults to gemini-3.6-flash (env GEMINI_MODEL)")
-	hfAPIKey := fs.String("hf-api-key", os.Getenv("HF_API_KEY"), "optional Hugging Face API token; used as a fallback for the @mention LLM feature when Gemini is unavailable, or as the primary provider when Gemini isn't configured (env HF_API_KEY)")
-	hfModel := fs.String("hf-model", os.Getenv("HF_MODEL"), "Hugging Face model used for the @mention LLM feature, defaults to meta-llama/Llama-3.3-70B-Instruct (env HF_MODEL)")
-	logLevel := fs.String("log-level", envOrDefault("LOG_LEVEL", "warn"), "log level: trace, debug or warn (env LOG_LEVEL)")
-	disableAnek := fs.Bool("disable-anek", envBool("DISABLE_ANEK"), "disable the \"анек!\" joke trigger and inline joke queries (env DISABLE_ANEK)")
-	disableSwearing := fs.Bool("disable-swearing", envBool("DISABLE_SWEARING"), "disable reacting to swear words (env DISABLE_SWEARING)")
-	disableLLM := fs.Bool("disable-llm", envBool("DISABLE_LLM"), "disable the @mention LLM feature even if -gemini-api-key or -hf-api-key is set (env DISABLE_LLM)")
-
+	configPath := fs.String("config", os.Getenv("ANEKBOT_CONFIG"), "path to the JSON config file (env ANEKBOT_CONFIG)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 
+	fc, err := loadFileConfig(*configPath)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &config{
-		botToken:        *botToken,
-		mode:            *mode,
-		port:            *port,
-		webhookPath:     *webhookPath,
-		webhookSecret:   *webhookSecret,
-		swearWordsFile:  *swearWordsFile,
-		geminiAPIKey:    *geminiAPIKey,
-		geminiModel:     *geminiModel,
-		hfAPIKey:        *hfAPIKey,
-		hfModel:         *hfModel,
-		logLevel:        *logLevel,
-		disableAnek:     *disableAnek,
-		disableSwearing: *disableSwearing,
-		disableLLM:      *disableLLM,
+		botToken:      envOrDefault("BOT_TOKEN", fc.Bot.Token),
+		mode:          envOrDefault("ANEKBOT_MODE", or(fc.Bot.Mode, "webhook")),
+		logLevel:      envOrDefault("LOG_LEVEL", or(fc.Bot.LogLevel, "warn")),
+		port:          envOrDefault("PORT", or(fc.Server.Port, "8080")),
+		webhookPath:   or(fc.Server.WebhookPath, "/webhook"),
+		webhookSecret: envOrDefault("WEBHOOK_SECRET_TOKEN", fc.Server.WebhookSecret),
+
+		anekEnabled:       enabled(fc.Anek.Enabled),
+		inlineEnabled:     enabled(fc.Anek.Inline.Enabled),
+		aiJokesEnabled:    enabled(fc.Anek.Inline.AIJokes),
+		questionsEnabled:  enabled(fc.Questions.Enabled),
+		swearingEnabled:   enabled(fc.Swearing.Enabled),
+		swearingWordsFile: fc.Swearing.WordsFile,
+	}
+
+	for _, pc := range fc.LLM.Providers {
+		provider, err := buildProvider(pc)
+		if err != nil {
+			return nil, err
+		}
+		if provider != nil {
+			cfg.llmProviders = append(cfg.llmProviders, provider)
+		}
+	}
+
+	if fc.Anek.Inline.Promotions != nil {
+		if cfg.promotions, err = anekbot.NewPromotions(*fc.Anek.Inline.Promotions); err != nil {
+			return nil, err
+		}
 	}
 
 	if cfg.botToken == "" {
-		return nil, errors.New("bot token is required: set -bot-token or BOT_TOKEN")
+		return nil, errors.New("bot token is required: set BOT_TOKEN or bot.token in the config file")
 	}
 	if cfg.mode != "webhook" && cfg.mode != "poll" {
 		return nil, fmt.Errorf("invalid mode %q: must be %q or %q", cfg.mode, "webhook", "poll")
@@ -90,16 +181,18 @@ func loadConfig(args []string) (*config, error) {
 	return cfg, nil
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
+func or(v, def string) string {
+	if v != "" {
 		return v
 	}
 	return def
 }
 
-func envBool(key string) bool {
-	v, _ := strconv.ParseBool(os.Getenv(key))
-	return v
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func main() {
@@ -118,13 +211,15 @@ func main() {
 	defer cancel()
 
 	var anek *anekbot.AnekHandler
-	if !cfg.disableAnek {
+	if cfg.anekEnabled {
 		anek = anekbot.NewAnekHandler()
+		anek.SetInline(cfg.inlineEnabled, cfg.aiJokesEnabled)
+		anek.SetPromotions(cfg.promotions)
 	}
 
 	var swearing *anekbot.SwearingHandler
-	if !cfg.disableSwearing {
-		swearing, err = anekbot.NewSwearingHandler(cfg.swearWordsFile)
+	if cfg.swearingEnabled {
+		swearing, err = anekbot.NewSwearingHandler(cfg.swearingWordsFile)
 		if err != nil {
 			log.Fatalf("swearing handler: %v", err)
 		}
@@ -151,25 +246,19 @@ func main() {
 		log.Fatalf("get bot info: %v", err)
 	}
 
-	useGemini := cfg.geminiAPIKey != "" && !cfg.disableLLM
-	useHF := cfg.hfAPIKey != "" && !cfg.disableLLM
-
-	var primary, fallback anekbot.LLMProvider
-	switch {
-	case useGemini && useHF:
-		primary = anekbot.NewGeminiProvider(cfg.geminiAPIKey, cfg.geminiModel)
-		fallback = anekbot.NewHuggingFaceProvider(cfg.hfAPIKey, cfg.hfModel)
-	case useGemini:
-		primary = anekbot.NewGeminiProvider(cfg.geminiAPIKey, cfg.geminiModel)
-	case useHF:
-		primary = anekbot.NewHuggingFaceProvider(cfg.hfAPIKey, cfg.hfModel)
+	var llm *anekbot.LLM
+	if len(cfg.llmProviders) > 0 {
+		llm = anekbot.NewLLM(cfg.llmProviders...)
+	}
+	if anek != nil {
+		anek.SetLLM(llm)
+	}
+	hasQuestions := llm != nil && cfg.questionsEnabled
+	if hasQuestions {
+		dispatcher.SetQuestions(anekbot.NewQuestionsHandler(me.Username, llm))
 	}
 
-	if primary != nil {
-		dispatcher.SetLLM(anekbot.NewLLMHandler(me.Username, primary, fallback))
-	}
-
-	dispatcher.SetHelp(anekbot.NewHelpHandler(me.Username, !cfg.disableAnek, !cfg.disableSwearing, primary != nil))
+	dispatcher.SetHelp(anekbot.NewHelpHandler(me.Username, cfg.anekEnabled, cfg.swearingEnabled, hasQuestions))
 
 	switch cfg.mode {
 	case "poll":

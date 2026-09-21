@@ -24,18 +24,18 @@ type Handler interface {
 
 type Dispatcher struct {
 	// nil disables the handler
-	anek     *AnekHandler
-	swearing *SwearingHandler
-	llm      *LLMHandler
-	help     *HelpHandler
+	anek      *AnekHandler
+	swearing  *SwearingHandler
+	questions *QuestionsHandler
+	help      *HelpHandler
 }
 
-func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, llm *LLMHandler, help *HelpHandler) *Dispatcher {
-	return &Dispatcher{anek: anek, swearing: swearing, llm: llm, help: help}
+func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, questions *QuestionsHandler, help *HelpHandler) *Dispatcher {
+	return &Dispatcher{anek: anek, swearing: swearing, questions: questions, help: help}
 }
 
-func (d *Dispatcher) SetLLM(llm *LLMHandler) {
-	d.llm = llm
+func (d *Dispatcher) SetQuestions(questions *QuestionsHandler) {
+	d.questions = questions
 }
 
 func (d *Dispatcher) SetHelp(help *HelpHandler) {
@@ -57,8 +57,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		if d.swearing != nil {
 			handlers = append(handlers, d.swearing)
 		}
-		if d.llm != nil {
-			handlers = append(handlers, d.llm)
+		if d.questions != nil {
+			handlers = append(handlers, d.questions)
 		}
 		if d.help != nil {
 			handlers = append(handlers, d.help)
@@ -84,7 +84,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		logDebugf("dispatcher: chosen inline result from user=%s", userLabel(&update.ChosenInlineResult.From))
 		if d.anek != nil {
 			logDebugf("dispatcher: firing %s chosen-inline-result handler", d.anek.Name())
-			d.anek.HandleChosenInlineResult(ctx, sender, update, d.llm)
+			d.anek.HandleChosenInlineResult(ctx, sender, update)
 		}
 	case update.CallbackQuery != nil:
 		logDebugf("dispatcher: callback query from user=%s", userLabel(&update.CallbackQuery.From))
