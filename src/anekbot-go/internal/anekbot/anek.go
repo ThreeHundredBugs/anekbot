@@ -49,6 +49,7 @@ type AnekHandler struct {
 	client    *http.Client
 	baseURL   string
 	randFloat func() float64
+	promos    *Promotions
 }
 
 func NewAnekHandler() *AnekHandler {
@@ -57,6 +58,10 @@ func NewAnekHandler() *AnekHandler {
 		baseURL:   defaultBaseURL,
 		randFloat: rand.Float64,
 	}
+}
+
+func (h *AnekHandler) SetPromotions(p *Promotions) {
+	h.promos = p
 }
 
 func (h *AnekHandler) Name() string {
@@ -126,6 +131,7 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 			ID:                  strconv.Itoa(i),
 			Title:               inlineTitle(joke),
 			InputMessageContent: models.InputTextMessageContent{MessageText: joke},
+			ReplyMarkup:         h.promos.Keyboard(),
 		})
 	}
 
@@ -202,11 +208,14 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 }
 
 func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inlineMessageID, text string, tryHTML bool) {
-	// Clear the pending-button keyboard now that the real content has arrived.
+	markup := h.promos.Keyboard()
+	if markup == nil {
+		markup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}}
+	}
 	params := &bot.EditMessageTextParams{
 		InlineMessageID: inlineMessageID,
 		Text:            text,
-		ReplyMarkup:     &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}},
+		ReplyMarkup:     markup,
 	}
 	if tryHTML {
 		params.ParseMode = models.ParseModeHTML
@@ -224,11 +233,12 @@ func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inli
 	}
 }
 
-// HandleCallback acks taps on the transient pending-generation button so the
+// HandleCallback acks taps on the transient pending-generation button and on link-less promotion buttons so the
 // Telegram client doesn't leave the user staring at a stuck loading spinner;
 // the actual joke arrives via HandleChosenInlineResult regardless of any tap.
 func (h *AnekHandler) HandleCallback(ctx context.Context, sender Sender, update *models.Update) {
-	if update.CallbackQuery == nil || update.CallbackQuery.Data != aiJokePendingCallbackData {
+	if update.CallbackQuery == nil ||
+		(update.CallbackQuery.Data != aiJokePendingCallbackData && update.CallbackQuery.Data != promotionCallbackData) {
 		return
 	}
 	if _, err := sender.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{

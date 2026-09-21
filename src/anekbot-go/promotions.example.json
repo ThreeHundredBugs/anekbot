@@ -1,0 +1,10 @@
+{
+  "promotions": {
+    "frequency": 0.5,
+    "items": [
+      { "message": "Test channel", "weight": 3, "link": "https://t.me/telegram" },
+      { "message": "Test promo with link", "weight": 2, "link": "https://example.com" },
+      { "message": "Test promo without link", "weight": 1 }
+    ]
+  }
+}

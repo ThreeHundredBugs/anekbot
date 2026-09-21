@@ -28,6 +28,7 @@ type config struct {
 	webhookPath     string
 	webhookSecret   string
 	swearWordsFile  string
+	promotionsFile  string
 	geminiAPIKey    string
 	geminiModel     string
 	hfAPIKey        string
@@ -47,6 +48,7 @@ func loadConfig(args []string) (*config, error) {
 	webhookPath := fs.String("webhook-path", envOrDefault("WEBHOOK_PATH", "/webhook"), "HTTP path Telegram will POST updates to (env WEBHOOK_PATH)")
 	webhookSecret := fs.String("webhook-secret", os.Getenv("WEBHOOK_SECRET_TOKEN"), "optional secret validated against X-Telegram-Bot-Api-Secret-Token (env WEBHOOK_SECRET_TOKEN)")
 	swearWordsFile := fs.String("swearwords-file", os.Getenv("SWEARWORDS_FILE"), "optional path to an extra swear word list (one word per line) merged with the built-in list (env SWEARWORDS_FILE)")
+	promotionsFile := fs.String("promotions-file", os.Getenv("PROMOTIONS_FILE"), "optional path to a JSON file with promotion buttons ({\"promotions\": {\"frequency\": 0.2, \"items\": [{\"message\", \"weight\", \"link\"}]}}) attached to a fraction of inline results (env PROMOTIONS_FILE)")
 	geminiAPIKey := fs.String("gemini-api-key", os.Getenv("GEMINI_API_KEY"), "optional Gemini API key; when set, @mentioning the bot asks Gemini and replies with the answer (env GEMINI_API_KEY)")
 	geminiModel := fs.String("gemini-model", os.Getenv("GEMINI_MODEL"), "Gemini model used for the @mention LLM feature, defaults to gemini-3.6-flash (env GEMINI_MODEL)")
 	hfAPIKey := fs.String("hf-api-key", os.Getenv("HF_API_KEY"), "optional Hugging Face API token; used as a fallback for the @mention LLM feature when Gemini is unavailable, or as the primary provider when Gemini isn't configured (env HF_API_KEY)")
@@ -67,6 +69,7 @@ func loadConfig(args []string) (*config, error) {
 		webhookPath:     *webhookPath,
 		webhookSecret:   *webhookSecret,
 		swearWordsFile:  *swearWordsFile,
+		promotionsFile:  *promotionsFile,
 		geminiAPIKey:    *geminiAPIKey,
 		geminiModel:     *geminiModel,
 		hfAPIKey:        *hfAPIKey,
@@ -120,6 +123,13 @@ func main() {
 	var anek *anekbot.AnekHandler
 	if !cfg.disableAnek {
 		anek = anekbot.NewAnekHandler()
+		if cfg.promotionsFile != "" {
+			promos, err := anekbot.LoadPromotions(cfg.promotionsFile)
+			if err != nil {
+				log.Fatalf("promotions: %v", err)
+			}
+			anek.SetPromotions(promos)
+		}
 	}
 
 	var swearing *anekbot.SwearingHandler
