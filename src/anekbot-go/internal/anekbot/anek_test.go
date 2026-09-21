@@ -224,7 +224,7 @@ func TestAnekHandler_HandleInline_WithQuery_ShowsPlaceholder(t *testing.T) {
 		t.Errorf("result id = %q, want %q", article.ID, aiJokeResultID)
 	}
 
-	wantTitle := "Сгенерировать анек с помощью ИИ на тему про котов"
+	wantTitle := "Сгенерировать ИИ-анек на тему про котов"
 	if article.Title != wantTitle {
 		t.Errorf("title = %q, want %q", article.Title, wantTitle)
 	}
