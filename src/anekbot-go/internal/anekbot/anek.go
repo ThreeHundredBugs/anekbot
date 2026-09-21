@@ -27,7 +27,7 @@ const (
 	inlineSuggestionCount = 3
 	inlineTitleMaxRunes   = 60
 
-	inlineAITitlePrefix  = "Сгенерировать анек с помощью ИИ на тему "
+	inlineAITitlePrefix  = "Сгенерировать ИИ-анек на тему "
 	inlineAITextMaxRunes = 100
 	inlineAICacheSeconds = 120
 	aiJokeResultID       = "ai-joke"
@@ -50,6 +50,10 @@ type AnekHandler struct {
 	baseURL   string
 	randFloat func() float64
 	promos    *Promotions
+	llm       *LLM
+
+	inlineDisabled  bool
+	aiJokesDisabled bool
 }
 
 func NewAnekHandler() *AnekHandler {
@@ -62,6 +66,15 @@ func NewAnekHandler() *AnekHandler {
 
 func (h *AnekHandler) SetPromotions(p *Promotions) {
 	h.promos = p
+}
+
+func (h *AnekHandler) SetLLM(llm *LLM) {
+	h.llm = llm
+}
+
+func (h *AnekHandler) SetInline(enabled, aiJokes bool) {
+	h.inlineDisabled = !enabled
+	h.aiJokesDisabled = !aiJokes
 }
 
 func (h *AnekHandler) Name() string {
@@ -95,13 +108,13 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 }
 
 func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *models.Update) {
-	if update.InlineQuery == nil {
+	if update.InlineQuery == nil || h.inlineDisabled {
 		return
 	}
 	query := update.InlineQuery
 
 	topic := strings.Join(strings.Fields(query.Query), " ")
-	if topic != "" {
+	if topic != "" && !h.aiJokesDisabled {
 		h.answerAIJokePlaceholderInline(ctx, sender, query, topic)
 		return
 	}
@@ -177,8 +190,8 @@ func (h *AnekHandler) answerAIJokePlaceholderInline(ctx context.Context, sender 
 // placeholder result from answerAIJokePlaceholderInline, then edits it in place.
 // This relies on Telegram delivering chosen_inline_result updates, which requires
 // inline feedback to be enabled for the bot via BotFather's /setinlinefeedback.
-func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sender, update *models.Update, llm *LLMHandler) {
-	if update.ChosenInlineResult == nil {
+func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sender, update *models.Update) {
+	if update.ChosenInlineResult == nil || h.aiJokesDisabled {
 		return
 	}
 	chosen := update.ChosenInlineResult
@@ -191,13 +204,13 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 		return
 	}
 
-	if llm == nil {
+	if h.llm == nil {
 		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
 		return
 	}
 
 	logDebugf("anek handler: generating AI joke for topic %q", topic)
-	joke, _, err := llm.Ask(ctx, fmt.Sprintf(aiJokePromptTemplate, topic))
+	joke, _, err := h.llm.Ask(ctx, fmt.Sprintf(aiJokePromptTemplate, topic))
 	if err != nil {
 		logWarnf("anek handler: generate AI joke: %v", err)
 		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)

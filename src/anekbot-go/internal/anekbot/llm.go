@@ -1,14 +1,6 @@
 package anekbot
 
-import (
-	"context"
-	"fmt"
-	"regexp"
-	"strings"
-
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
-)
+import "context"
 
 const (
 	telegramMessageMaxRunes = 4096
@@ -29,102 +21,27 @@ type LLMProvider interface {
 	Ask(ctx context.Context, question string) (string, error)
 }
 
-type LLMHandler struct {
-	primary        LLMProvider
-	fallback       LLMProvider // nil if there's no fallback provider configured
-	mentionPattern *regexp.Regexp
+type LLM struct {
+	providers []LLMProvider
 }
 
-func NewLLMHandler(botUsername string, primary, fallback LLMProvider) *LLMHandler {
-	return &LLMHandler{
-		primary:        primary,
-		fallback:       fallback,
-		mentionPattern: regexp.MustCompile(`(?i)@` + regexp.QuoteMeta(botUsername) + `\b`),
-	}
+func NewLLM(providers ...LLMProvider) *LLM {
+	return &LLM{providers: providers}
 }
 
-func (h *LLMHandler) Name() string {
-	return "llm"
-}
-
-func (h *LLMHandler) Handle(ctx context.Context, sender Sender, update *models.Update) {
-	if update.Message == nil || update.Message.Text == "" {
-		return
-	}
-	msg := update.Message
-
-	question, ok := h.extractQuestion(msg.Text)
-	if !ok {
-		return
-	}
-	logDebugf("llm handler: answering question in chat_id=%d", msg.Chat.ID)
-
-	answer, providerName, err := h.Ask(ctx, question)
-	if err != nil {
-		if _, sendErr := sender.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:          msg.Chat.ID,
-			Text:            llmUnavailableMessage,
-			ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
-		}); sendErr != nil {
-			logWarnf("llm handler: send unavailable message: %v", sendErr)
+func (l *LLM) Ask(ctx context.Context, question string) (answer, providerName string, err error) {
+	for i, provider := range l.providers {
+		answer, err = provider.Ask(ctx, question)
+		if err == nil {
+			return answer, provider.Name(), nil
 		}
-		return
-	}
-
-	signature := fmt.Sprintf("\n\nby %s", providerName)
-	answer = truncateToRunes(answer, telegramMessageMaxRunes-len([]rune(signature))) + signature
-
-	_, err = sender.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          msg.Chat.ID,
-		Text:            answer,
-		ParseMode:       models.ParseModeHTML,
-		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
-	})
-	if err == nil {
-		return
-	}
-	logWarnf("llm handler: send message: %v", err)
-
-	// The model's HTML may be malformed; fall back to plain text rather than dropping the answer.
-	if _, err := sender.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:          msg.Chat.ID,
-		Text:            answer,
-		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
-	}); err != nil {
-		logWarnf("llm handler: send plain-text fallback: %v", err)
-	}
-}
-
-func (h *LLMHandler) Ask(ctx context.Context, question string) (answer, providerName string, err error) {
-	provider := h.primary
-	answer, err = provider.Ask(ctx, question)
-	if err != nil {
-		logWarnf("llm handler: primary provider: %v", err)
-		if h.fallback != nil {
-			provider = h.fallback
-			answer, err = provider.Ask(ctx, question)
-			if err != nil {
-				logWarnf("llm handler: fallback provider: %v", err)
-			}
+		if i == 0 {
+			logWarnf("llm: primary provider: %v", err)
+		} else {
+			logWarnf("llm: fallback provider %s: %v", provider.Name(), err)
 		}
 	}
-	if err != nil {
-		return "", "", err
-	}
-	return answer, provider.Name(), nil
-}
-
-func (h *LLMHandler) extractQuestion(text string) (question string, ok bool) {
-	loc := h.mentionPattern.FindStringIndex(text)
-	if loc == nil {
-		return "", false
-	}
-
-	question = strings.TrimSpace(text[:loc[0]] + text[loc[1]:])
-	if question == "" {
-		return "", false
-	}
-	return question, true
+	return "", "", err
 }
 
 func truncateToRunes(s string, max int) string {

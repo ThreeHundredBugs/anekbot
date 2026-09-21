@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
-	"os"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -18,11 +17,11 @@ type Promotion struct {
 	Link    string  `json:"link,omitempty"`
 }
 
-type promotionsFile struct {
-	Promotions struct {
-		Frequency float64     `json:"frequency"`
-		Items     []Promotion `json:"items"`
-	} `json:"promotions"`
+// PromotionsConfig is the "promotions" section of the bot's config file.
+type PromotionsConfig struct {
+	// Frequency (0-1) is the share of inline results that get a promotion button.
+	Frequency float64     `json:"frequency"`
+	Items     []Promotion `json:"items"`
 }
 
 type Promotions struct {
@@ -32,20 +31,19 @@ type Promotions struct {
 	randFloat   func() float64
 }
 
-func LoadPromotions(path string) (*Promotions, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read promotions file: %w", err)
-	}
-	return ParsePromotions(data)
-}
-
+// ParsePromotions parses a JSON document holding a top-level "promotions" section.
 func ParsePromotions(data []byte) (*Promotions, error) {
-	var f promotionsFile
+	var f struct {
+		Promotions PromotionsConfig `json:"promotions"`
+	}
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse promotions: %w", err)
 	}
-	cfg := f.Promotions
+	return NewPromotions(f.Promotions)
+}
+
+// NewPromotions validates cfg and builds a Promotions picker from it.
+func NewPromotions(cfg PromotionsConfig) (*Promotions, error) {
 	if cfg.Frequency < 0 || cfg.Frequency > 1 {
 		return nil, fmt.Errorf("promotions.frequency %v out of range 0-1", cfg.Frequency)
 	}

@@ -1,0 +1,44 @@
+{
+  "bot": {
+    "token": "123456:replace-me",
+    "mode": "poll",
+    "log_level": "trace"
+  },
+  "server": {
+    "port": "8080",
+    "webhook_path": "/webhook",
+    "webhook_secret": ""
+  },
+
+  "llm": {
+    "providers": [
+      { "type": "gemini", "model": "gemini-3.6-flash", "api_key_env": "GEMINI_API_KEY" },
+      { "type": "huggingface", "model": "meta-llama/Llama-3.3-70B-Instruct", "api_key_env": "HF_API_KEY" }
+    ]
+  },
+
+  "anek": {
+    "enabled": true,
+    "inline": {
+      "enabled": true,
+      "ai_jokes": true,
+      "promotions": {
+        "frequency": 0.8,
+        "items": [
+          { "message": "Test channel", "weight": 3, "link": "https://t.me/telegram" },
+          { "message": "Test promo with link", "weight": 2, "link": "https://example.com" },
+          { "message": "Test promo without link", "weight": 1 }
+        ]
+      }
+    }
+  },
+
+  "questions": {
+    "enabled": true
+  },
+
+  "swearing": {
+    "enabled": true,
+    "words_file": ""
+  }
+}

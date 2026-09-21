@@ -101,11 +101,11 @@ func TestAnekHandler_HandleChosenInlineResult_AttachesPromotion(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	h.SetPromotions(mustParsePromotions(t, testPromotionsJSON, 0.1, 0.5))
 	sender := &fakeSender{}
-	llm := NewLLMHandler("anekbot", &fakeLLMProvider{answer: "joke"}, nil)
+	h.SetLLM(NewLLM(&fakeLLMProvider{answer: "joke"}))
 
 	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID: aiJokeResultID, Query: "cats", InlineMessageID: "m",
-	}}, llm)
+	}})
 
 	markup := sender.editedMessages[0].ReplyMarkup.(*models.InlineKeyboardMarkup)
 	if len(markup.InlineKeyboard) != 1 || markup.InlineKeyboard[0][0].Text != "heavy" {
@@ -121,15 +121,5 @@ func TestAnekHandler_HandleCallback_AcksPromotionButton(t *testing.T) {
 
 	if len(sender.callbackAnswers) != 1 {
 		t.Fatalf("expected callback ack, got %+v", sender.callbackAnswers)
-	}
-}
-
-func TestLoadPromotions_ExampleFile(t *testing.T) {
-	p, err := LoadPromotions("../../promotions.example.json")
-	if err != nil {
-		t.Fatalf("LoadPromotions: %v", err)
-	}
-	if len(p.promotions) == 0 {
-		t.Error("example file has no items")
 	}
 }
