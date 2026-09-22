@@ -89,8 +89,6 @@ func TestHuggingFaceProvider_Ask_APIError(t *testing.T) {
 }
 
 func TestHuggingFaceProvider_Ask_APIError_StringShaped(t *testing.T) {
-	// Some Hugging Face router failures report "error" as a plain string
-	// instead of an {"message": "..."} object.
 	p, _ := newTestHuggingFaceProvider(t, http.StatusInternalServerError, `{"error":"boom"}`)
 
 	_, err := p.Ask(context.Background(), testSystemPrompt, "are you ok")

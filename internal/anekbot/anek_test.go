@@ -229,9 +229,7 @@ func TestAnekHandler_HandleInline_WithQuery_ShowsPlaceholder(t *testing.T) {
 		t.Errorf("title = %q, want %q", article.Title, wantTitle)
 	}
 
-	// The LLM must not be consulted while the user is still typing; the message
-	// content sent immediately on tap is just a placeholder, filled in later by
-	// HandleChosenInlineResult once Telegram confirms the result was chosen.
+	// Placeholder only; the real joke arrives later via HandleChosenInlineResult.
 	content, ok := article.InputMessageContent.(models.InputTextMessageContent)
 	if !ok {
 		t.Fatalf("input message content type = %T, want models.InputTextMessageContent", article.InputMessageContent)
@@ -240,8 +238,7 @@ func TestAnekHandler_HandleInline_WithQuery_ShowsPlaceholder(t *testing.T) {
 		t.Errorf("message text = %q, want placeholder %q", content.MessageText, aiJokeGeneratingMessage)
 	}
 
-	// Telegram only assigns an inline_message_id (needed later to edit the message)
-	// to results sent with an inline keyboard attached, so one must be present.
+	// A keyboard must be present; that's how Telegram assigns an inline_message_id.
 	markup, ok := article.ReplyMarkup.(*models.InlineKeyboardMarkup)
 	if !ok {
 		t.Fatalf("reply markup type = %T, want *models.InlineKeyboardMarkup", article.ReplyMarkup)

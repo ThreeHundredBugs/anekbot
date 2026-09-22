@@ -9,7 +9,6 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-// HelpHandler answers the /help command with a description of what the bot can do.
 type HelpHandler struct {
 	text           string
 	commandPattern *regexp.Regexp

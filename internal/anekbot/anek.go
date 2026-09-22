@@ -36,10 +36,7 @@ const (
 	inlineAICacheSeconds = 120
 	aiJokeResultID       = "ai-joke"
 
-	// aiJokePendingCallbackData is attached to a placeholder button on the AI-joke
-	// result. Telegram only assigns an inline_message_id (needed to edit the message
-	// once the joke is ready) to messages sent with an inline keyboard attached, so
-	// the button exists purely for that; HandleCallback just acks taps on it.
+	// This button exists only so Telegram assigns an inline_message_id we can edit later.
 	aiJokePendingButtonText   = "⏳"
 	aiJokePendingCallbackData = "ai-joke-pending"
 )
@@ -162,10 +159,8 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 	}
 }
 
-// answerAIJokePlaceholderInline answers a non-empty inline query with a single result
-// carrying placeholder text. The actual joke is generated once Telegram reports (via
-// a chosen_inline_result update) that the user picked this result and it was sent,
-// at which point HandleChosenInlineResult edits the message in place with the joke.
+// answerAIJokePlaceholderInline sends placeholder text; HandleChosenInlineResult fills
+// in the real joke once Telegram reports the user picked this result.
 func (h *AnekHandler) answerAIJokePlaceholderInline(ctx context.Context, sender Sender, query *models.InlineQuery, topic string) {
 	title := truncateToRunes(inlineAITitlePrefix+topic, inlineAITextMaxRunes)
 
@@ -190,10 +185,8 @@ func (h *AnekHandler) answerAIJokePlaceholderInline(ctx context.Context, sender 
 	}
 }
 
-// HandleChosenInlineResult generates the AI joke once the user has actually sent the
-// placeholder result from answerAIJokePlaceholderInline, then edits it in place.
-// This relies on Telegram delivering chosen_inline_result updates, which requires
-// inline feedback to be enabled for the bot via BotFather's /setinlinefeedback.
+// HandleChosenInlineResult replaces answerAIJokePlaceholderInline's placeholder with
+// the real joke. Requires inline feedback enabled via BotFather's /setinlinefeedback.
 func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sender, update *models.Update) {
 	if update.ChosenInlineResult == nil || h.aiJokesDisabled {
 		return
@@ -214,7 +207,7 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 	}
 
 	logDebugf("anek handler: generating AI joke for topic %q", topic)
-	joke, _, err := h.llm.AskFor(ctx, chosen.From.ID, fmt.Sprintf(aiJokePromptTemplate, topic))
+	joke, _, err := h.llm.AskFor(ctx, llm.UserID(chosen.From.ID), fmt.Sprintf(aiJokePromptTemplate, topic))
 	if err != nil {
 		logWarnf("anek handler: generate AI joke: %v", err)
 		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
@@ -250,9 +243,8 @@ func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inli
 	}
 }
 
-// HandleCallback acks taps on the transient pending-generation button and on link-less promotion buttons so the
-// Telegram client doesn't leave the user staring at a stuck loading spinner;
-// the actual joke arrives via HandleChosenInlineResult regardless of any tap.
+// HandleCallback just acks button taps so Telegram doesn't show a stuck spinner;
+// the joke itself arrives separately via HandleChosenInlineResult.
 func (h *AnekHandler) HandleCallback(ctx context.Context, sender Sender, update *models.Update) {
 	if update.CallbackQuery == nil ||
 		(update.CallbackQuery.Data != aiJokePendingCallbackData && update.CallbackQuery.Data != promotionCallbackData) {
@@ -297,8 +289,7 @@ func (h *AnekHandler) fetchJoke(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// rzhunemogu.ru serves windows-1251-encoded bytes,
-	// but Telegram rejects non-UTF-8 text
+	// rzhunemogu.ru serves windows-1251; Telegram requires UTF-8.
 	utf8Body, err := charmap.Windows1251.NewDecoder().Bytes(body)
 	if err != nil {
 		return "", fmt.Errorf("decode windows-1251 response: %w", err)

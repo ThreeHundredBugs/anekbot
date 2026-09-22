@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// LogLevel controls how verbose anekbot's logging is.
 type LogLevel int
 
 const (
@@ -38,8 +37,7 @@ func ParseLogLevel(s string) (LogLevel, error) {
 	}
 }
 
-// jsonValue defers marshaling until it's actually formatted (via String), so
-// wrapping a value with asJSON costs nothing when the enclosing log call is skipped.
+// jsonValue defers marshaling until String is called, so a skipped log call costs nothing.
 type jsonValue struct{ v any }
 
 func (j jsonValue) String() string {

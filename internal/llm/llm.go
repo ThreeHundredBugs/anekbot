@@ -22,6 +22,8 @@ const (
 
 var ErrBusy = errors.New("llm: rate limit or concurrency limit reached")
 
+type UserID int64
+
 type Provider interface {
 	Name() string
 	Ask(ctx context.Context, systemPrompt, question string) (string, error)
@@ -32,7 +34,7 @@ type LLM struct {
 	providers    []Provider
 
 	concurrency *flowcontrol.Semaphore
-	perUser     *flowcontrol.PerKeyLimiter[int64]
+	perUser     *flowcontrol.PerKeyLimiter[UserID]
 }
 
 func New(systemPrompt string, providers ...Provider) *LLM {
@@ -40,7 +42,7 @@ func New(systemPrompt string, providers ...Provider) *LLM {
 		systemPrompt: systemPrompt,
 		providers:    providers,
 		concurrency:  flowcontrol.NewSemaphore(maxConcurrent),
-		perUser: &flowcontrol.PerKeyLimiter[int64]{
+		perUser: &flowcontrol.PerKeyLimiter[UserID]{
 			Limit:         userLimit,
 			Window:        userWindow,
 			PruneInterval: pruneInterval,
@@ -49,7 +51,7 @@ func New(systemPrompt string, providers ...Provider) *LLM {
 	}
 }
 
-func (l *LLM) AskFor(ctx context.Context, userID int64, question string) (answer, providerName string, err error) {
+func (l *LLM) AskFor(ctx context.Context, userID UserID, question string) (answer, providerName string, err error) {
 	if !l.perUser.Allow(userID) {
 		return "", "", ErrBusy
 	}
@@ -62,7 +64,6 @@ func (l *LLM) AskFor(ctx context.Context, userID int64, question string) (answer
 	return l.Ask(ctx, question)
 }
 
-// Ask tries each provider in order, returning the first successful answer.
 func (l *LLM) Ask(ctx context.Context, question string) (answer, providerName string, err error) {
 	for i, provider := range l.providers {
 		answer, err = provider.Ask(ctx, l.systemPrompt, question)

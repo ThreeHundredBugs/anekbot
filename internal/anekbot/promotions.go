@@ -42,7 +42,6 @@ func ParsePromotions(data []byte) (*Promotions, error) {
 	return NewPromotions(f.Promotions)
 }
 
-// NewPromotions validates cfg and builds a Promotions picker from it.
 func NewPromotions(cfg PromotionsConfig) (*Promotions, error) {
 	if cfg.Frequency < 0 || cfg.Frequency > 1 {
 		return nil, fmt.Errorf("promotions.frequency %v out of range 0-1", cfg.Frequency)

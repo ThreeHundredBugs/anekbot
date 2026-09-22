@@ -242,7 +242,3 @@ func TestLLMHandler_TruncatesLongAnswer(t *testing.T) {
 		t.Errorf("sent text length = %d runes, want %d", got, telegramMessageMaxRunes)
 	}
 }
-
-// The provider-fallback chain (Ask) and the per-user/concurrency limiting (AskFor) are
-// implemented and tested in internal/llm; the tests above only cover how QuestionsHandler
-// and AnekHandler use an *llm.LLM, not that type's own internals.

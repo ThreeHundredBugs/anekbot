@@ -29,8 +29,7 @@ type hfRequest struct {
 	MaxTokens int         `json:"max_tokens"`
 }
 
-// hfError accepts the two shapes the Hugging Face router uses for errors:
-// a plain string, or an object with a "message" field.
+// hfError accepts both error shapes the Hugging Face router uses: a plain string, or {"message": "..."}.
 type hfError struct {
 	Message string
 }

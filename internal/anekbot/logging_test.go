@@ -78,8 +78,7 @@ func TestLogLevelFiltering(t *testing.T) {
 	}
 }
 
-// countingValue counts how many times it's marshaled to JSON, to prove asJSON
-// defers encoding until the log line is actually emitted.
+// countingValue counts marshals, to prove asJSON defers encoding until logged.
 type countingValue struct {
 	Field        string `json:"field"`
 	marshalCount *int

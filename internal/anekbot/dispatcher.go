@@ -7,6 +7,8 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
 type Sender interface {
@@ -109,9 +111,9 @@ func userLabel(u *models.User) string {
 	return "unknown"
 }
 
-func userID(u *models.User) int64 {
+func userID(u *models.User) llm.UserID {
 	if u == nil {
 		return 0
 	}
-	return u.ID
+	return llm.UserID(u.ID)
 }

@@ -10,8 +10,6 @@ const (
 	llmUnavailableMessage = "ИИ сейчас недоступен, попробуйте ещё раз позже."
 )
 
-// llmSystemPrompt tells the LLM how to behave for anekbot's Telegram context. It lives here,
-// not in the llm package, which has no knowledge of Telegram or any other specific caller.
 const llmSystemPrompt = "You are a helpful assistant replying in a Telegram chat. Keep answers concise. " +
 	"This is a one-shot reply: the user cannot follow up or continue the conversation, so make your answer " +
 	"self-contained and don't ask clarifying questions or offer to elaborate further. " +
@@ -20,7 +18,6 @@ const llmSystemPrompt = "You are a helpful assistant replying in a Telegram chat
 	"If you need to format, reply as Telegram HTML: only <b>, <i>, <u>, <s>, <code>, <pre> and <a href=\"...\"> tags are " +
 	"supported, no other tags or Markdown syntax. Escape any literal <, > and & that aren't part of a tag."
 
-// NewLLM builds an *llm.LLM configured with anekbot's Telegram-specific system prompt.
 func NewLLM(providers ...llm.Provider) *llm.LLM {
 	return llm.New(llmSystemPrompt, providers...)
 }

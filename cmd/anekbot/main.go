@@ -31,7 +31,7 @@ type config struct {
 	webhookPath   string
 	webhookSecret string
 
-	// llmProviders are tried in order; empty means no LLM is available.
+	// llmProviders is tried in order; empty means no LLM.
 	llmProviders []llm.Provider
 
 	anekEnabled       bool
@@ -77,7 +77,7 @@ type fileConfig struct {
 type providerConfig struct {
 	Type  string `json:"type"`
 	Model string `json:"model"`
-	// APIKeyEnv overrides which env var holds the key; defaults depend on Type.
+	// APIKeyEnv overrides the default env var for Type.
 	APIKeyEnv string `json:"api_key_env"`
 }
 
@@ -120,7 +120,6 @@ func loadFileConfig(path string) (*fileConfig, error) {
 	return &fc, nil
 }
 
-// enabled reports whether an optional "enabled"-style setting is on; unset means on.
 func enabled(v *bool) bool {
 	return v == nil || *v
 }

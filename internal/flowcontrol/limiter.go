@@ -1,6 +1,3 @@
-// Package flowcontrol provides generic, in-memory rate- and concurrency-limiting
-// primitives shared by anekbot's handlers. It has no knowledge of Telegram, LLM
-// providers, or any other domain concept — it only tracks keys and time.
 package flowcontrol
 
 import (
@@ -8,23 +5,16 @@ import (
 	"time"
 )
 
-// PerKeyLimiter enforces a sliding-window request quota per key (e.g. a Telegram
-// user ID). It also bounds its own memory: entries whose window has expired are
-// swept periodically, and if the number of distinct keys still exceeds MaxKeys
-// afterwards (e.g. during a burst of many distinct keys within one prune
-// interval), the oldest entries are evicted regardless of expiry.
+// PerKeyLimiter enforces a sliding-window request quota per key. It also bounds its own
+// memory: expired entries are swept periodically, and if distinct keys still exceed MaxKeys
+// afterwards, the oldest entries are evicted regardless of expiry.
 type PerKeyLimiter[K comparable] struct {
-	// Limit is the maximum number of Allow calls per key within Window.
-	Limit int
-	// Window is the sliding window duration each key's quota resets on.
+	Limit  int
 	Window time.Duration
-	// PruneInterval bounds how long a stale entry can outlive its window before
-	// being swept.
+	// PruneInterval bounds how long a stale entry can outlive its window before being swept.
 	PruneInterval time.Duration
-	// MaxKeys is a safety valve: the map of tracked keys is never allowed to
-	// exceed this size, even under a burst of many distinct keys.
-	MaxKeys int
-	// Now returns the current time; defaults to time.Now. Overridable for tests.
+	MaxKeys       int
+	// Now defaults to time.Now; overridable for tests.
 	Now func() time.Time
 
 	mu        sync.Mutex
@@ -37,8 +27,7 @@ type window struct {
 	count int
 }
 
-// Allow reports whether key is still under its per-window quota, counting the
-// call toward that quota if so.
+// Allow reports whether key is still under its per-window quota, counting this call if so.
 func (l *PerKeyLimiter[K]) Allow(key K) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -84,9 +73,7 @@ func (l *PerKeyLimiter[K]) expireLocked(now time.Time) {
 	}
 }
 
-// evictOldestLocked removes the n oldest-started windows, regardless of whether
-// they've expired, to keep the map bounded even under a burst of distinct keys.
-// l.mu must be held.
+// evictOldestLocked removes the n oldest-started windows regardless of expiry. l.mu must be held.
 func (l *PerKeyLimiter[K]) evictOldestLocked(n int) {
 	if n <= 0 {
 		return
@@ -108,7 +95,7 @@ func (l *PerKeyLimiter[K]) evictOldestLocked(n int) {
 	}
 }
 
-// Len reports how many distinct keys are currently tracked. Intended for tests.
+// Len is for tests.
 func (l *PerKeyLimiter[K]) Len() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()

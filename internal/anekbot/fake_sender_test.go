@@ -18,8 +18,7 @@ type fakeSender struct {
 	editedMessages  []*bot.EditMessageTextParams
 	callbackAnswers []*bot.AnswerCallbackQueryParams
 
-	// failSendMessageIf, when set, makes SendMessage fail (without recording the
-	// call) for any params it returns true for. Used to exercise fallback paths.
+	// failSendMessageIf makes SendMessage fail (without recording) when it returns true.
 	failSendMessageIf func(*bot.SendMessageParams) bool
 
 	// failEditMessageTextIf works like failSendMessageIf, but for EditMessageText.
