@@ -125,7 +125,7 @@ func TestHandler_ServesPrometheusFormat(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `anekbot_aneks_sent_total{kind="classic",source="message"} 1`) {
+	if !strings.Contains(body, `anekbot_aneks_sent_total{source="message",kind="classic"} 1`) {
 		t.Errorf("body missing expected metric line, got:\n%s", body)
 	}
 }

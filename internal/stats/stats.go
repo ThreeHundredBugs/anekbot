@@ -2,6 +2,7 @@ package stats
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -9,26 +10,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/VictoriaMetrics/metrics"
 )
 
 type UserID int64
 
 type Stats struct {
-	registry *prometheus.Registry
+	set *metrics.Set
 
-	aneksTotal          *prometheus.CounterVec
-	llmRequestsTotal    *prometheus.CounterVec
-	llmRequestDuration  *prometheus.HistogramVec
-	llmFallbackTotal    prometheus.Counter
-	rateLimitRejections *prometheus.CounterVec
-	swearingReactions   prometheus.Counter
-	promotionsShown     prometheus.Counter
-	questionsAnswered   prometheus.Counter
-	llmConcurrencyInUse prometheus.Gauge
-	uniqueUsers         prometheus.Gauge
+	llmFallbackTotal    *metrics.Counter
+	swearingReactions   *metrics.Counter
+	promotionsShown     *metrics.Counter
+	questionsAnswered   *metrics.Counter
+	llmConcurrencyInUse *metrics.Gauge
+	uniqueUsers         *metrics.Gauge
 
 	totalAneksClassic atomic.Int64
 	totalAneksAI      atomic.Int64
@@ -43,69 +38,30 @@ type userCount struct {
 }
 
 func New() *Stats {
+	metrics.ExposeMetadata(true)
+
+	set := metrics.NewSet()
 	s := &Stats{
-		registry: prometheus.NewRegistry(),
-		perUser:  make(map[UserID]*userCount),
+		set:     set,
+		perUser: make(map[UserID]*userCount),
 
-		aneksTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "anekbot_aneks_sent_total",
-			Help: "Jokes delivered to users, by source and kind.",
-		}, []string{"source", "kind"}),
-		llmRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "anekbot_llm_requests_total",
-			Help: "LLM provider requests, by provider and outcome.",
-		}, []string{"provider", "status"}),
-		llmRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "anekbot_llm_request_duration_seconds",
-			Help:    "LLM provider request latency in seconds.",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"provider"}),
-		llmFallbackTotal: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "anekbot_llm_fallback_total",
-			Help: "Requests answered by a fallback provider after the primary one failed.",
-		}),
-		rateLimitRejections: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "anekbot_rate_limit_rejections_total",
-			Help: "LLM requests rejected by a rate or concurrency limit, by scope.",
-		}, []string{"scope"}),
-		swearingReactions: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "anekbot_swearing_reactions_total",
-			Help: "Messages the swearing handler reacted to.",
-		}),
-		promotionsShown: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "anekbot_promotions_shown_total",
-			Help: "Promotion buttons attached to a message.",
-		}),
-		questionsAnswered: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "anekbot_questions_answered_total",
-			Help: "@mention questions answered by the LLM.",
-		}),
-		llmConcurrencyInUse: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "anekbot_llm_concurrency_in_use",
-			Help: "LLM requests currently in flight.",
-		}),
-		uniqueUsers: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "anekbot_unique_users",
-			Help: "Distinct users seen since process start.",
-		}),
+		llmFallbackTotal:  set.NewCounter("anekbot_llm_fallback_total"),
+		swearingReactions: set.NewCounter("anekbot_swearing_reactions_total"),
+		promotionsShown:   set.NewCounter("anekbot_promotions_shown_total"),
+		questionsAnswered: set.NewCounter("anekbot_questions_answered_total"),
 	}
-
-	s.registry.MustRegister(
-		s.aneksTotal, s.llmRequestsTotal, s.llmRequestDuration, s.llmFallbackTotal,
-		s.rateLimitRejections, s.swearingReactions, s.promotionsShown, s.questionsAnswered,
-		s.llmConcurrencyInUse, s.uniqueUsers,
-		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-	)
+	s.llmConcurrencyInUse = set.NewGauge("anekbot_llm_concurrency_in_use", nil)
+	s.uniqueUsers = set.NewGauge("anekbot_unique_users", nil)
 	return s
 }
 
-// RecordAnek attributes a delivered joke to user, and to the Prometheus totals for source
+// RecordAnek attributes a delivered joke to user, and to the totals for source
 // ("message"/"inline") and kind ("classic"/"ai"). s may be nil.
 func (s *Stats) RecordAnek(user UserID, username, source, kind string) {
 	if s == nil {
 		return
 	}
-	s.aneksTotal.WithLabelValues(source, kind).Inc()
+	s.set.GetOrCreateCounter(labeled("anekbot_aneks_sent_total", "source", source, "kind", kind)).Inc()
 	if kind == "ai" {
 		s.totalAneksAI.Add(1)
 	} else {
@@ -144,8 +100,8 @@ func (s *Stats) ObserveRequest(provider string, ok bool, duration time.Duration)
 	if ok {
 		status = "ok"
 	}
-	s.llmRequestsTotal.WithLabelValues(provider, status).Inc()
-	s.llmRequestDuration.WithLabelValues(provider).Observe(duration.Seconds())
+	s.set.GetOrCreateCounter(labeled("anekbot_llm_requests_total", "provider", provider, "status", status)).Inc()
+	s.set.GetOrCreateHistogram(labeled("anekbot_llm_request_duration_seconds", "provider", provider)).Update(duration.Seconds())
 }
 
 func (s *Stats) ObserveFallback() {
@@ -159,7 +115,7 @@ func (s *Stats) ObserveRateLimitRejection(scope string) {
 	if s == nil {
 		return
 	}
-	s.rateLimitRejections.WithLabelValues(scope).Inc()
+	s.set.GetOrCreateCounter(labeled("anekbot_rate_limit_rejections_total", "scope", scope)).Inc()
 }
 
 func (s *Stats) IncConcurrency() {
@@ -240,14 +196,15 @@ func (s *Stats) Snapshot(topN int) Snapshot {
 // token via constant-time comparison. token must be non-empty; callers should not mount
 // this handler otherwise.
 func (s *Stats) Handler(token string) http.Handler {
-	metrics := promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !validBearerToken(r, token) {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		metrics.ServeHTTP(w, r)
+		s.set.WritePrometheus(w)
+		metrics.WriteGoMetrics(w)
+		metrics.WriteProcessMetrics(w)
 	})
 }
 
@@ -259,4 +216,20 @@ func validBearerToken(r *http.Request, token string) bool {
 	}
 	got := auth[len(prefix):]
 	return subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
+}
+
+// labeled builds a VictoriaMetrics-style metric name with inline labels, e.g.
+// labeled("foo", "a", "1", "b", "2") -> `foo{a="1",b="2"}`. kv must have an even length.
+func labeled(name string, kv ...string) string {
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteByte('{')
+	for i := 0; i < len(kv); i += 2 {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%s=%q", kv[i], kv[i+1])
+	}
+	b.WriteByte('}')
+	return b.String()
 }
