@@ -17,8 +17,8 @@
     ],
     "rate_limit": {
       "max_concurrent": 16,
-      "per_user_limit": 5,
-      "per_user_window_seconds": 60,
+      "per_user_limit": 2,
+      "per_user_window_seconds": 15,
       "max_users": 100000,
       "prune_interval_seconds": 1800
     }
@@ -30,7 +30,7 @@
       "enabled": true,
       "ai_jokes": true,
       "promotions": {
-        "frequency": 0.8,
+        "frequency": 0.2,
         "items": [
           { "message": "Test channel", "weight": 3, "link": "https://t.me/telegram" },
           { "message": "Test promo with link", "weight": 2, "link": "https://example.com" },

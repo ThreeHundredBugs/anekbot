@@ -1,6 +1,8 @@
 package anekbot
 
 import (
+	"errors"
+
 	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
@@ -8,7 +10,15 @@ const (
 	telegramMessageMaxRunes = 4096
 
 	llmUnavailableMessage = "ИИ сейчас недоступен, попробуйте ещё раз позже."
+	llmRateLimitedMessage = "Слишком много запросов, попробуйте через минуту."
 )
+
+func llmErrorMessage(err error) string {
+	if errors.Is(err, llm.ErrBusy) {
+		return llmRateLimitedMessage
+	}
+	return llmUnavailableMessage
+}
 
 const llmSystemPrompt = "You are a helpful assistant replying in a Telegram chat. Keep answers concise. " +
 	"This is a one-shot reply: the user cannot follow up or continue the conversation, so make your answer " +

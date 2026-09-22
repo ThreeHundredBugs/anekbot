@@ -328,6 +328,49 @@ func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenProviderFails(t *te
 	}
 }
 
+func TestAnekHandler_HandleChosenInlineResult_NoPromoOnError(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	h.SetPromotions(mustParsePromotions(t, testPromotionsJSON, 0.1, 0.5))
+	sender := &fakeSender{}
+	h.SetLLM(NewLLM(llm.Limits{}, &fakeLLMProvider{err: errors.New("down")}))
+
+	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID: aiJokeResultID, Query: "cats", InlineMessageID: "m",
+	}})
+
+	if len(sender.editedMessages) != 1 {
+		t.Fatalf("expected 1 EditMessageText call, got %d", len(sender.editedMessages))
+	}
+	markup, ok := sender.editedMessages[0].ReplyMarkup.(*models.InlineKeyboardMarkup)
+	if !ok {
+		t.Fatalf("reply markup type = %T, want *models.InlineKeyboardMarkup", sender.editedMessages[0].ReplyMarkup)
+	}
+	if len(markup.InlineKeyboard) != 0 {
+		t.Errorf("keyboard = %+v, want empty (no promo on an errored message)", markup.InlineKeyboard)
+	}
+}
+
+func TestAnekHandler_HandleChosenInlineResult_RateLimitedMessage(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+	h.SetLLM(NewLLM(llm.Limits{PerUserLimit: 1}, &fakeLLMProvider{answer: "joke"}))
+
+	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID:        aiJokeResultID,
+		Query:           "котов",
+		InlineMessageID: "inline-msg-1",
+	}}
+	h.HandleChosenInlineResult(context.Background(), sender, update)
+	h.HandleChosenInlineResult(context.Background(), sender, update)
+
+	if len(sender.editedMessages) != 2 {
+		t.Fatalf("expected 2 EditMessageText calls, got %d", len(sender.editedMessages))
+	}
+	if got := sender.editedMessages[1].Text; got != llmRateLimitedMessage {
+		t.Errorf("text = %q, want %q (second call should be rate-limited, not generically unavailable)", got, llmRateLimitedMessage)
+	}
+}
+
 func TestAnekHandler_HandleChosenInlineResult_IgnoresOtherResults(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}

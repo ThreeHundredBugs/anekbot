@@ -41,6 +41,7 @@ func TestLoadConfig_ExampleFile(t *testing.T) {
 
 func TestLoadConfig_Defaults(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("WEBHOOK_SECRET_TOKEN", "test-secret")
 	cfg, err := loadConfig([]string{"-config", writeConfig(t, `{"bot": {"token": "t"}}`)})
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
@@ -86,6 +87,7 @@ func TestLoadConfig_ConfigPathFromEnv(t *testing.T) {
 
 func TestLoadConfig_DisabledFeatures(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("WEBHOOK_SECRET_TOKEN", "test-secret")
 	path := writeConfig(t, `{"bot": {"token": "t"},
 		"anek": {"enabled": false, "inline": {"ai_jokes": false}},
 		"questions": {"enabled": false}, "swearing": {"enabled": false}}`)
@@ -101,6 +103,7 @@ func TestLoadConfig_DisabledFeatures(t *testing.T) {
 
 func TestLoadConfig_LLMProviderKeysFromEnv(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("WEBHOOK_SECRET_TOKEN", "test-secret")
 	t.Setenv("GEMINI_API_KEY", "default-gemini-key")
 	t.Setenv("MY_HF_KEY", "custom-hf-key")
 	path := writeConfig(t, `{"bot": {"token": "t"}, "llm": {"providers": [
@@ -123,6 +126,7 @@ func TestLoadConfig_LLMProviderKeysFromEnv(t *testing.T) {
 
 func TestLoadConfig_LLMRateLimit(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("WEBHOOK_SECRET_TOKEN", "test-secret")
 	path := writeConfig(t, `{"bot": {"token": "t"}, "llm": {"rate_limit": {
 		"max_concurrent": 4,
 		"per_user_limit": 2,
@@ -149,6 +153,7 @@ func TestLoadConfig_LLMRateLimit(t *testing.T) {
 
 func TestLoadConfig_LLMRateLimit_DefaultsToZeroValue(t *testing.T) {
 	clearEnv(t)
+	t.Setenv("WEBHOOK_SECRET_TOKEN", "test-secret")
 	path := writeConfig(t, `{"bot": {"token": "t"}}`)
 
 	cfg, err := loadConfig([]string{"-config", path})
@@ -163,13 +168,14 @@ func TestLoadConfig_LLMRateLimit_DefaultsToZeroValue(t *testing.T) {
 func TestLoadConfig_Invalid(t *testing.T) {
 	clearEnv(t)
 	tests := map[string]string{
-		"unknown key":       `{"bot": {"token": "t", "tokn": "x"}}`,
-		"api key in file":   `{"bot": {"token": "t"}, "llm": {"providers": [{"type": "gemini", "api_key": "x"}]}}`,
-		"unknown provider":  `{"bot": {"token": "t"}, "llm": {"providers": [{"type": "gpt"}]}}`,
-		"bad promotions":    `{"bot": {"token": "t"}, "anek": {"inline": {"promotions": {"frequency": 2}}}}`,
-		"invalid json":      `{`,
-		"missing bot token": `{}`,
-		"invalid mode":      `{"bot": {"token": "t", "mode": "carrier-pigeon"}}`,
+		"unknown key":            `{"bot": {"token": "t", "tokn": "x"}}`,
+		"api key in file":        `{"bot": {"token": "t"}, "llm": {"providers": [{"type": "gemini", "api_key": "x"}]}}`,
+		"unknown provider":       `{"bot": {"token": "t"}, "llm": {"providers": [{"type": "gpt"}]}}`,
+		"bad promotions":         `{"bot": {"token": "t"}, "anek": {"inline": {"promotions": {"frequency": 2}}}}`,
+		"invalid json":           `{`,
+		"missing bot token":      `{}`,
+		"invalid mode":           `{"bot": {"token": "t", "mode": "carrier-pigeon"}}`,
+		"webhook without secret": `{"bot": {"token": "t", "mode": "webhook"}}`,
 	}
 	for name, content := range tests {
 		t.Run(name, func(t *testing.T) {

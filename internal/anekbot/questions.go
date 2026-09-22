@@ -45,7 +45,7 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 	if err != nil {
 		if _, sendErr := sender.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,
-			Text:            llmUnavailableMessage,
+			Text:            llmErrorMessage(err),
 			ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 		}); sendErr != nil {
 			logging.Warnf("questions handler: send unavailable message: %v", sendErr)

@@ -188,6 +188,9 @@ func loadConfig(args []string) (*config, error) {
 	if cfg.mode != "webhook" && cfg.mode != "poll" {
 		return nil, fmt.Errorf("invalid mode %q: must be %q or %q", cfg.mode, "webhook", "poll")
 	}
+	if cfg.mode == "webhook" && cfg.webhookSecret == "" {
+		return nil, errors.New("webhook mode requires a secret: set WEBHOOK_SECRET_TOKEN or server.webhook_secret in the config file")
+	}
 	if _, err := logging.ParseLevel(cfg.logLevel); err != nil {
 		return nil, err
 	}

@@ -203,7 +203,7 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 	}
 
 	if h.llm == nil {
-		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
+		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false, false)
 		return
 	}
 
@@ -211,17 +211,19 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 	joke, _, err := h.llm.AskFor(ctx, llm.UserID(chosen.From.ID), fmt.Sprintf(aiJokePromptTemplate, topic))
 	if err != nil {
 		logging.Warnf("anek handler: generate AI joke: %v", err)
-		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
+		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmErrorMessage(err), false, false)
 		return
 	}
 
-	h.editInlineMessage(ctx, sender, chosen.InlineMessageID, truncateToRunes(joke, telegramMessageMaxRunes), true)
+	h.editInlineMessage(ctx, sender, chosen.InlineMessageID, truncateToRunes(joke, telegramMessageMaxRunes), true, true)
 }
 
-func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inlineMessageID, text string, tryHTML bool) {
-	markup := h.promos.Keyboard()
-	if markup == nil {
-		markup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}}
+func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inlineMessageID, text string, tryHTML, withPromo bool) {
+	markup := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}}
+	if withPromo {
+		if promoMarkup := h.promos.Keyboard(); promoMarkup != nil {
+			markup = promoMarkup
+		}
 	}
 	params := &bot.EditMessageTextParams{
 		InlineMessageID: inlineMessageID,

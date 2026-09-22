@@ -174,6 +174,26 @@ func TestLLMHandler_SendsUnavailableMessageWhenPrimaryFailsWithNoFallback(t *tes
 	}
 }
 
+func TestLLMHandler_SendsRateLimitedMessageWhenOverQuota(t *testing.T) {
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{PerUserLimit: 1}, &fakeLLMProvider{answer: "42"}))
+	sender := &fakeSender{}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "@anekbot are you there?",
+	}}
+	h.Handle(context.Background(), sender, update)
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 2 {
+		t.Fatalf("expected 2 messages sent, got %d", len(sender.sentMessages))
+	}
+	if sent := sender.sentMessages[1]; sent.Text != llmRateLimitedMessage {
+		t.Errorf("text = %q, want %q (second call should be rate-limited, not generically unavailable)", sent.Text, llmRateLimitedMessage)
+	}
+}
+
 func TestLLMHandler_SendsUnavailableMessageWhenBothProvidersFail(t *testing.T) {
 	primary := &fakeLLMProvider{err: errors.New("primary down")}
 	fallback := &fakeLLMProvider{err: errors.New("fallback down")}
