@@ -2,11 +2,13 @@ package anekbot
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
 
 	"github.com/ThreeHundredBugs/anekbot/internal/llm"
+	"github.com/ThreeHundredBugs/anekbot/internal/stats"
 )
 
 const testPromotionsJSON = `{"promotions": {"frequency": 0.2, "items": [
@@ -112,6 +114,52 @@ func TestAnekHandler_HandleChosenInlineResult_AttachesPromotion(t *testing.T) {
 	markup := sender.editedMessages[0].ReplyMarkup.(*models.InlineKeyboardMarkup)
 	if len(markup.InlineKeyboard) != 1 || markup.InlineKeyboard[0][0].Text != "heavy" {
 		t.Errorf("keyboard = %+v, want heavy promotion", markup.InlineKeyboard)
+	}
+}
+
+// A classic inline query offers inlineSuggestionCount candidate results, each independently
+// rolled for a promo; only one (if any) is ever actually picked and delivered. The shown-promo
+// counter must reflect deliveries, not offers.
+func TestAnekHandler_HandleInline_PromotionCountedOnlyOnConfirmedPick(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	h.SetPromotions(mustParsePromotions(t, testPromotionsJSON, 0.1, 0.5)) // always attaches a promo
+	st := stats.New()
+	h.SetStats(st)
+	sender := &fakeSender{}
+
+	h.HandleInline(context.Background(), sender, &models.Update{InlineQuery: &models.InlineQuery{ID: "q", Query: ""}})
+
+	results := sender.inlineAnswers[0].Results
+	if got := len(results); got != inlineSuggestionCount {
+		t.Fatalf("expected %d offered results, got %d", inlineSuggestionCount, got)
+	}
+	if got := st.Snapshot(0).PromotionsShown; got != 0 {
+		t.Errorf("promotions shown before any pick = %d, want 0", got)
+	}
+
+	// Every offered result should carry a promo with these rolls; each one's ID says so.
+	for _, r := range results {
+		id := r.(*models.InlineQueryResultArticle).ID
+		if !strings.HasSuffix(id, classicResultPromoSuffix) {
+			t.Fatalf("result id = %q, want it to carry the promo suffix", id)
+		}
+	}
+	firstID := results[0].(*models.InlineQueryResultArticle).ID
+
+	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID: firstID,
+	}})
+
+	if got := st.Snapshot(0).PromotionsShown; got != 1 {
+		t.Errorf("promotions shown after one confirmed pick = %d, want 1", got)
+	}
+
+	// A chosen-result event for a plain (non-promo) result must not add to the count.
+	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
+		ResultID: "0",
+	}})
+	if got := st.Snapshot(0).PromotionsShown; got != 1 {
+		t.Errorf("promotions shown after a non-promo pick = %d, want still 1", got)
 	}
 }
 

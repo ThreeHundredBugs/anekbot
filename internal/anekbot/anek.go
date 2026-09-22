@@ -43,6 +43,7 @@ const (
 	// This button exists only so Telegram assigns an inline_message_id we can edit later.
 	aiJokePendingButtonText   = "⏳"
 	aiJokePendingCallbackData = "ai-joke-pending"
+	classicResultPromoSuffix  = ":promo"
 )
 
 const aiJokePromptTemplate = "Придумай короткий анекдот на русском языке на тему: %s. " +
@@ -168,15 +169,15 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 		if joke == "" {
 			continue
 		}
-		// Telegram doesn't report which (if any) offered result the user picks unless
-		// inline feedback is enabled; HandleChosenInlineResult records the confirmed send
-		// when it is.
+		// Telegram doesn't report which (if any) offered result
+		// the user picks unless inline feedback is enabled
 		markup := h.promos.Keyboard()
+		resultID := strconv.Itoa(i)
 		if markup != nil {
-			h.stats.RecordPromotionShown()
+			resultID += classicResultPromoSuffix
 		}
 		results = append(results, &models.InlineQueryResultArticle{
-			ID:                  strconv.Itoa(i),
+			ID:                  resultID,
 			Title:               inlineTitle(joke),
 			InputMessageContent: models.InputTextMessageContent{MessageText: joke},
 			ReplyMarkup:         markup,
@@ -229,6 +230,9 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 
 	if chosen.ResultID != aiJokeResultID {
 		// A classic (non-AI) inline joke was actually sent
+		if strings.HasSuffix(chosen.ResultID, classicResultPromoSuffix) {
+			h.stats.RecordPromotionShown()
+		}
 		h.stats.RecordAnek(stats.UserID(userID(&chosen.From)), username(&chosen.From), "inline", "classic")
 		return
 	}
