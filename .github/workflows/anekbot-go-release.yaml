@@ -6,10 +6,6 @@ on:
       - "v*"
   workflow_dispatch:
 
-defaults:
-  run:
-    working-directory: src/anekbot-go
-
 jobs:
   build:
     name: Build ${{matrix.goos}}/${{matrix.goarch}}
@@ -32,8 +28,8 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: src/anekbot-go/go.mod
-          cache-dependency-path: src/anekbot-go/go.sum
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: Build
         env:
@@ -55,8 +51,8 @@ jobs:
         with:
           name: anekbot-${{matrix.goos}}-${{matrix.goarch}}
           path: |
-            src/anekbot-go/anekbot-${{matrix.goos}}-${{matrix.goarch}}.tar.gz
-            src/anekbot-go/anekbot-${{matrix.goos}}-${{matrix.goarch}}.tar.gz.sha256
+            anekbot-${{matrix.goos}}-${{matrix.goarch}}.tar.gz
+            anekbot-${{matrix.goos}}-${{matrix.goarch}}.tar.gz.sha256
 
   release:
     name: Create GitHub Release

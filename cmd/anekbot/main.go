@@ -17,7 +17,8 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
-	"github.com/ThreeHundredBugs/anekbot/src/anekbot-go/internal/anekbot"
+	"github.com/ThreeHundredBugs/anekbot/internal/anekbot"
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -31,7 +32,7 @@ type config struct {
 	webhookSecret string
 
 	// llmProviders are tried in order; empty means no LLM is available.
-	llmProviders []anekbot.LLMProvider
+	llmProviders []llm.Provider
 
 	anekEnabled       bool
 	inlineEnabled     bool
@@ -85,7 +86,7 @@ var defaultAPIKeyEnv = map[string]string{
 	"huggingface": "HF_API_KEY",
 }
 
-func buildProvider(pc providerConfig) (anekbot.LLMProvider, error) {
+func buildProvider(pc providerConfig) (llm.Provider, error) {
 	defEnv, ok := defaultAPIKeyEnv[pc.Type]
 	if !ok {
 		return nil, fmt.Errorf("llm.providers: unknown type %q: must be %q or %q", pc.Type, "gemini", "huggingface")
@@ -97,9 +98,9 @@ func buildProvider(pc providerConfig) (anekbot.LLMProvider, error) {
 		return nil, nil
 	}
 	if pc.Type == "gemini" {
-		return anekbot.NewGeminiProvider(key, pc.Model), nil
+		return llm.NewGeminiProvider(key, pc.Model), nil
 	}
-	return anekbot.NewHuggingFaceProvider(key, pc.Model), nil
+	return llm.NewHuggingFaceProvider(key, pc.Model), nil
 }
 
 func loadFileConfig(path string) (*fileConfig, error) {
@@ -246,16 +247,16 @@ func main() {
 		log.Fatalf("get bot info: %v", err)
 	}
 
-	var llm *anekbot.LLM
+	var llmClient *llm.LLM
 	if len(cfg.llmProviders) > 0 {
-		llm = anekbot.NewLLM(cfg.llmProviders...)
+		llmClient = anekbot.NewLLM(cfg.llmProviders...)
 	}
 	if anek != nil {
-		anek.SetLLM(llm)
+		anek.SetLLM(llmClient)
 	}
-	hasQuestions := llm != nil && cfg.questionsEnabled
+	hasQuestions := llmClient != nil && cfg.questionsEnabled
 	if hasQuestions {
-		dispatcher.SetQuestions(anekbot.NewQuestionsHandler(me.Username, llm))
+		dispatcher.SetQuestions(anekbot.NewQuestionsHandler(me.Username, llmClient))
 	}
 
 	dispatcher.SetHelp(anekbot.NewHelpHandler(me.Username, cfg.anekEnabled, cfg.swearingEnabled, hasQuestions))
@@ -275,7 +276,14 @@ func runWebhook(ctx context.Context, cfg *config, b *bot.Bot) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	srv := &http.Server{Addr: ":" + cfg.port, Handler: mux}
+	srv := &http.Server{
+		Addr:              ":" + cfg.port,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	go func() {
 		log.Printf("anekbot listening on %s (webhook path %s)", srv.Addr, cfg.webhookPath)

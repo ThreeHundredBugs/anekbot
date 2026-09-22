@@ -5,20 +5,22 @@ on:
     branches:
       - main
     paths:
-      - src/anekbot-go/**
+      - cmd/**
+      - internal/**
+      - go.mod
+      - go.sum
       - .github/workflows/anekbot-go-ci.yaml
   pull_request:
     paths:
-      - src/anekbot-go/**
+      - cmd/**
+      - internal/**
+      - go.mod
+      - go.sum
       - .github/workflows/anekbot-go-ci.yaml
 
 concurrency:
   group: anekbot-ci-${{github.ref}}
   cancel-in-progress: true
-
-defaults:
-  run:
-    working-directory: src/anekbot-go
 
 jobs:
   test:
@@ -31,8 +33,8 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: src/anekbot-go/go.mod
-          cache-dependency-path: src/anekbot-go/go.sum
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: Check formatting
         run: |

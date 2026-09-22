@@ -1,4 +1,4 @@
-package anekbot
+package llm
 
 import (
 	"bytes"
@@ -24,8 +24,9 @@ type hfMessage struct {
 }
 
 type hfRequest struct {
-	Model    string      `json:"model"`
-	Messages []hfMessage `json:"messages"`
+	Model     string      `json:"model"`
+	Messages  []hfMessage `json:"messages"`
+	MaxTokens int         `json:"max_tokens"`
 }
 
 // hfError accepts the two shapes the Hugging Face router uses for errors:
@@ -79,11 +80,12 @@ func (p *huggingFaceProvider) Name() string {
 	return "Hugging Face"
 }
 
-func (p *huggingFaceProvider) Ask(ctx context.Context, question string) (string, error) {
+func (p *huggingFaceProvider) Ask(ctx context.Context, systemPrompt, question string) (string, error) {
 	reqBody := hfRequest{
-		Model: p.model,
+		Model:     p.model,
+		MaxTokens: maxOutputTokens,
 		Messages: []hfMessage{
-			{Role: "system", Content: llmSystemPrompt},
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: question},
 		},
 	}
@@ -105,7 +107,7 @@ func (p *huggingFaceProvider) Ask(ctx context.Context, question string) (string,
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return "", err
 	}

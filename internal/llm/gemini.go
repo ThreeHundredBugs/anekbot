@@ -1,4 +1,4 @@
-package anekbot
+package llm
 
 import (
 	"bytes"
@@ -30,6 +30,9 @@ type geminiContent struct {
 type geminiRequest struct {
 	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
 	Contents          []geminiContent `json:"contents"`
+	GenerationConfig  struct {
+		MaxOutputTokens int `json:"maxOutputTokens"`
+	} `json:"generationConfig"`
 }
 
 type geminiResponse struct {
@@ -64,13 +67,14 @@ func (p *geminiProvider) Name() string {
 	return "Gemini"
 }
 
-func (p *geminiProvider) Ask(ctx context.Context, question string) (string, error) {
+func (p *geminiProvider) Ask(ctx context.Context, systemPrompt, question string) (string, error) {
 	reqBody := geminiRequest{
-		SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: llmSystemPrompt}}},
+		SystemInstruction: &geminiContent{Parts: []geminiPart{{Text: systemPrompt}}},
 		Contents: []geminiContent{
 			{Role: "user", Parts: []geminiPart{{Text: question}}},
 		},
 	}
+	reqBody.GenerationConfig.MaxOutputTokens = maxOutputTokens
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
@@ -90,7 +94,7 @@ func (p *geminiProvider) Ask(ctx context.Context, question string) (string, erro
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return "", err
 	}

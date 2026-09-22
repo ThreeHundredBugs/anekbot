@@ -24,7 +24,7 @@ __pycache__
 anekbot.zip
 .tgcloud/
 node_modules
-/src/anekbot-go/anekbot-go
-/src/anekbot-go/anekbot
-/src/anekbot-go/dist/
+/anekbot-go
+/anekbot
+/dist/
 *.test

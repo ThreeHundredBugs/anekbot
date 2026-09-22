@@ -1,4 +1,4 @@
-module github.com/ThreeHundredBugs/anekbot/src/anekbot-go
+module github.com/ThreeHundredBugs/anekbot
 
 go 1.27.1
 

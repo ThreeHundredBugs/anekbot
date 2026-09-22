@@ -14,6 +14,8 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"golang.org/x/text/encoding/charmap"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
 const (
@@ -23,6 +25,8 @@ const (
 	// http://rzhunemogu.ru/FAQ.aspx
 	anekTypeNormal = 1
 	anekType18Plus = 11
+
+	anekMaxResponseBytes = 16 << 10
 
 	inlineSuggestionCount = 3
 	inlineTitleMaxRunes   = 60
@@ -50,7 +54,7 @@ type AnekHandler struct {
 	baseURL   string
 	randFloat func() float64
 	promos    *Promotions
-	llm       *LLM
+	llm       *llm.LLM
 
 	inlineDisabled  bool
 	aiJokesDisabled bool
@@ -68,8 +72,8 @@ func (h *AnekHandler) SetPromotions(p *Promotions) {
 	h.promos = p
 }
 
-func (h *AnekHandler) SetLLM(llm *LLM) {
-	h.llm = llm
+func (h *AnekHandler) SetLLM(client *llm.LLM) {
+	h.llm = client
 }
 
 func (h *AnekHandler) SetInline(enabled, aiJokes bool) {
@@ -210,7 +214,7 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 	}
 
 	logDebugf("anek handler: generating AI joke for topic %q", topic)
-	joke, _, err := h.llm.Ask(ctx, fmt.Sprintf(aiJokePromptTemplate, topic))
+	joke, _, err := h.llm.AskFor(ctx, chosen.From.ID, fmt.Sprintf(aiJokePromptTemplate, topic))
 	if err != nil {
 		logWarnf("anek handler: generate AI joke: %v", err)
 		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
@@ -288,7 +292,7 @@ func (h *AnekHandler) fetchJoke(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, anekMaxResponseBytes))
 	if err != nil {
 		return "", err
 	}
@@ -303,5 +307,5 @@ func (h *AnekHandler) fetchJoke(ctx context.Context) (string, error) {
 	// The response isn't valid JSON
 	joke := strings.TrimPrefix(string(utf8Body), `{"content":"`)
 	joke = strings.TrimSuffix(joke, `"}`)
-	return joke, nil
+	return truncateToRunes(joke, telegramMessageMaxRunes), nil
 }

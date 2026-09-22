@@ -1,4 +1,4 @@
-package anekbot
+package llm
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func newTestHuggingFaceProvider(t *testing.T, statusCode int, responseBody strin
 func TestHuggingFaceProvider_Ask_Success(t *testing.T) {
 	p, lastRequest := newTestHuggingFaceProvider(t, http.StatusOK, `{"choices":[{"message":{"role":"assistant","content":"  42  "}}]}`)
 
-	answer, err := p.Ask(context.Background(), "what is the answer to everything?")
+	answer, err := p.Ask(context.Background(), testSystemPrompt, "what is the answer to everything?")
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -56,8 +56,8 @@ func TestHuggingFaceProvider_Ask_Success(t *testing.T) {
 	if len(req.Messages) != 2 || req.Messages[0].Role != "system" || req.Messages[1].Role != "user" {
 		t.Fatalf("messages = %+v, want [system, user]", req.Messages)
 	}
-	if req.Messages[0].Content != llmSystemPrompt {
-		t.Errorf("system message = %q, want the shared llmSystemPrompt", req.Messages[0].Content)
+	if req.Messages[0].Content != testSystemPrompt {
+		t.Errorf("system message = %q, want %q", req.Messages[0].Content, testSystemPrompt)
 	}
 	if want := "what is the answer to everything?"; req.Messages[1].Content != want {
 		t.Errorf("question = %q, want %q", req.Messages[1].Content, want)
@@ -68,7 +68,7 @@ func TestHuggingFaceProvider_Ask_CustomModel(t *testing.T) {
 	p, lastRequest := newTestHuggingFaceProvider(t, http.StatusOK, `{"choices":[{"message":{"content":"ok"}}]}`)
 	p.model = "custom-model"
 
-	if _, err := p.Ask(context.Background(), "hi"); err != nil {
+	if _, err := p.Ask(context.Background(), testSystemPrompt, "hi"); err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
 	if got := lastRequest().Model; got != "custom-model" {
@@ -79,7 +79,7 @@ func TestHuggingFaceProvider_Ask_CustomModel(t *testing.T) {
 func TestHuggingFaceProvider_Ask_APIError(t *testing.T) {
 	p, _ := newTestHuggingFaceProvider(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
 
-	_, err := p.Ask(context.Background(), "are you ok")
+	_, err := p.Ask(context.Background(), testSystemPrompt, "are you ok")
 	if err == nil {
 		t.Fatal("expected an error on a non-200 response")
 	}
@@ -93,7 +93,7 @@ func TestHuggingFaceProvider_Ask_APIError_StringShaped(t *testing.T) {
 	// instead of an {"message": "..."} object.
 	p, _ := newTestHuggingFaceProvider(t, http.StatusInternalServerError, `{"error":"boom"}`)
 
-	_, err := p.Ask(context.Background(), "are you ok")
+	_, err := p.Ask(context.Background(), testSystemPrompt, "are you ok")
 	if err == nil {
 		t.Fatal("expected an error on a non-200 response")
 	}
@@ -105,7 +105,7 @@ func TestHuggingFaceProvider_Ask_APIError_StringShaped(t *testing.T) {
 func TestHuggingFaceProvider_Ask_NoChoices(t *testing.T) {
 	p, _ := newTestHuggingFaceProvider(t, http.StatusOK, `{"choices":[]}`)
 
-	_, err := p.Ask(context.Background(), "are you ok")
+	_, err := p.Ask(context.Background(), testSystemPrompt, "are you ok")
 	if err == nil {
 		t.Fatal("expected an error when no choices are returned")
 	}

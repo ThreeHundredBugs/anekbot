@@ -8,16 +8,18 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
 type QuestionsHandler struct {
-	llm            *LLM
+	llm            *llm.LLM
 	mentionPattern *regexp.Regexp
 }
 
-func NewQuestionsHandler(botUsername string, llm *LLM) *QuestionsHandler {
+func NewQuestionsHandler(botUsername string, client *llm.LLM) *QuestionsHandler {
 	return &QuestionsHandler{
-		llm:            llm,
+		llm:            client,
 		mentionPattern: regexp.MustCompile(`(?i)@` + regexp.QuoteMeta(botUsername) + `\b`),
 	}
 }
@@ -38,7 +40,7 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 	}
 	logDebugf("questions handler: answering question in chat_id=%d", msg.Chat.ID)
 
-	answer, providerName, err := h.llm.Ask(ctx, question)
+	answer, providerName, err := h.llm.AskFor(ctx, userID(msg.From), question)
 	if err != nil {
 		if _, sendErr := sender.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          msg.Chat.ID,

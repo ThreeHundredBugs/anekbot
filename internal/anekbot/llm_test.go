@@ -22,7 +22,7 @@ func (f *fakeLLMProvider) Name() string {
 	return f.name
 }
 
-func (f *fakeLLMProvider) Ask(_ context.Context, _ string) (string, error) {
+func (f *fakeLLMProvider) Ask(_ context.Context, _, _ string) (string, error) {
 	f.calls++
 	if f.err != nil {
 		return "", f.err
@@ -243,19 +243,6 @@ func TestLLMHandler_TruncatesLongAnswer(t *testing.T) {
 	}
 }
 
-func TestLLM_Ask_ChainUsesFirstWorkingProvider(t *testing.T) {
-	first := &fakeLLMProvider{name: "First", err: errors.New("down")}
-	second := &fakeLLMProvider{name: "Second", err: errors.New("down")}
-	third := &fakeLLMProvider{name: "Third", answer: "ok"}
-	h := NewLLM(first, second, third)
-
-	answer, name, err := h.Ask(context.Background(), "q")
-	if err != nil || answer != "ok" || name != "Third" {
-		t.Errorf("got %q, %q, %v; want ok, Third, nil", answer, name, err)
-	}
-
-	third.err = errors.New("down")
-	if _, _, err := h.Ask(context.Background(), "q"); err == nil {
-		t.Error("expected an error when every provider fails")
-	}
-}
+// The provider-fallback chain (Ask) and the per-user/concurrency limiting (AskFor) are
+// implemented and tested in internal/llm; the tests above only cover how QuestionsHandler
+// and AnekHandler use an *llm.LLM, not that type's own internals.

@@ -108,3 +108,10 @@ func userLabel(u *models.User) string {
 	}
 	return "unknown"
 }
+
+func userID(u *models.User) int64 {
+	if u == nil {
+		return 0
+	}
+	return u.ID
+}

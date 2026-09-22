@@ -1,4 +1,4 @@
-package anekbot
+package llm
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 )
+
+const testSystemPrompt = "you are a test assistant"
 
 func newTestGeminiProvider(t *testing.T, statusCode int, responseBody string) (p *geminiProvider, lastRequest func() geminiRequest, lastPath func() string) {
 	t.Helper()
@@ -47,7 +49,7 @@ func newTestGeminiProvider(t *testing.T, statusCode int, responseBody string) (p
 func TestGeminiProvider_Ask_Success(t *testing.T) {
 	p, lastRequest, lastPath := newTestGeminiProvider(t, http.StatusOK, `{"candidates":[{"content":{"parts":[{"text":"  42  "}]}}]}`)
 
-	answer, err := p.Ask(context.Background(), "what is the answer to everything?")
+	answer, err := p.Ask(context.Background(), testSystemPrompt, "what is the answer to everything?")
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -62,8 +64,8 @@ func TestGeminiProvider_Ask_Success(t *testing.T) {
 	if want := "what is the answer to everything?"; req.Contents[0].Parts[0].Text != want {
 		t.Errorf("question = %q, want %q", req.Contents[0].Parts[0].Text, want)
 	}
-	if req.SystemInstruction == nil || req.SystemInstruction.Parts[0].Text != llmSystemPrompt {
-		t.Errorf("system instruction = %+v, want the shared llmSystemPrompt", req.SystemInstruction)
+	if req.SystemInstruction == nil || req.SystemInstruction.Parts[0].Text != testSystemPrompt {
+		t.Errorf("system instruction = %+v, want %q", req.SystemInstruction, testSystemPrompt)
 	}
 	if want := "/models/" + defaultGeminiModel + ":generateContent"; lastPath() != want {
 		t.Errorf("request path = %q, want %q", lastPath(), want)
@@ -82,7 +84,7 @@ func TestGeminiProvider_Ask_CustomModel(t *testing.T) {
 	p.client = server.Client()
 	p.baseURL = server.URL
 
-	if _, err := p.Ask(context.Background(), "hi"); err != nil {
+	if _, err := p.Ask(context.Background(), testSystemPrompt, "hi"); err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
 	if want := "/models/custom-model:generateContent"; path != want {
@@ -93,7 +95,7 @@ func TestGeminiProvider_Ask_CustomModel(t *testing.T) {
 func TestGeminiProvider_Ask_APIError(t *testing.T) {
 	p, _, _ := newTestGeminiProvider(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
 
-	_, err := p.Ask(context.Background(), "are you ok")
+	_, err := p.Ask(context.Background(), testSystemPrompt, "are you ok")
 	if err == nil {
 		t.Fatal("expected an error on a non-200 response")
 	}
@@ -102,7 +104,7 @@ func TestGeminiProvider_Ask_APIError(t *testing.T) {
 func TestGeminiProvider_Ask_NoCandidates(t *testing.T) {
 	p, _, _ := newTestGeminiProvider(t, http.StatusOK, `{"candidates":[]}`)
 
-	_, err := p.Ask(context.Background(), "are you ok")
+	_, err := p.Ask(context.Background(), testSystemPrompt, "are you ok")
 	if err == nil {
 		t.Fatal("expected an error when no candidates are returned")
 	}
