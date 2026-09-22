@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
 // fakeLLMProvider is a canned LLMProvider used to test LLMHandler without real HTTP calls.
@@ -32,7 +34,7 @@ func (f *fakeLLMProvider) Ask(_ context.Context, _, _ string) (string, error) {
 
 func TestLLMHandler_Trigger(t *testing.T) {
 	primary := &fakeLLMProvider{name: "Fake", answer: "42"}
-	h := NewQuestionsHandler("anekbot", NewLLM(primary))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, primary))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{
@@ -62,7 +64,7 @@ func TestLLMHandler_Trigger(t *testing.T) {
 }
 
 func TestLLMHandler_CaseInsensitiveMention(t *testing.T) {
-	h := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{answer: "fact"}))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "fact"}))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{
@@ -79,7 +81,7 @@ func TestLLMHandler_CaseInsensitiveMention(t *testing.T) {
 }
 
 func TestLLMHandler_NoMention(t *testing.T) {
-	h := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{answer: "fact"}))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "fact"}))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{
@@ -96,7 +98,7 @@ func TestLLMHandler_NoMention(t *testing.T) {
 }
 
 func TestLLMHandler_MentionWithoutQuestion(t *testing.T) {
-	h := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{answer: "fact"}))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "fact"}))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{
@@ -113,7 +115,7 @@ func TestLLMHandler_MentionWithoutQuestion(t *testing.T) {
 }
 
 func TestLLMHandler_NoMessage(t *testing.T) {
-	h := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{answer: "fact"}))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "fact"}))
 	sender := &fakeSender{}
 
 	h.Handle(context.Background(), sender, &models.Update{})
@@ -126,7 +128,7 @@ func TestLLMHandler_NoMessage(t *testing.T) {
 func TestLLMHandler_FallsBackToSecondaryProviderOnPrimaryError(t *testing.T) {
 	primary := &fakeLLMProvider{err: errors.New("primary down")}
 	fallback := &fakeLLMProvider{name: "Fallback", answer: "42"}
-	h := NewQuestionsHandler("anekbot", NewLLM(primary, fallback))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, primary, fallback))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{
@@ -153,7 +155,7 @@ func TestLLMHandler_FallsBackToSecondaryProviderOnPrimaryError(t *testing.T) {
 
 func TestLLMHandler_SendsUnavailableMessageWhenPrimaryFailsWithNoFallback(t *testing.T) {
 	primary := &fakeLLMProvider{err: errors.New("primary down")}
-	h := NewQuestionsHandler("anekbot", NewLLM(primary))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, primary))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{
@@ -175,7 +177,7 @@ func TestLLMHandler_SendsUnavailableMessageWhenPrimaryFailsWithNoFallback(t *tes
 func TestLLMHandler_SendsUnavailableMessageWhenBothProvidersFail(t *testing.T) {
 	primary := &fakeLLMProvider{err: errors.New("primary down")}
 	fallback := &fakeLLMProvider{err: errors.New("fallback down")}
-	h := NewQuestionsHandler("anekbot", NewLLM(primary, fallback))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, primary, fallback))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{
@@ -195,7 +197,7 @@ func TestLLMHandler_SendsUnavailableMessageWhenBothProvidersFail(t *testing.T) {
 }
 
 func TestLLMHandler_FallsBackToPlainTextWhenHTMLRejected(t *testing.T) {
-	h := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{name: "Fake", answer: "<b>42</b>"}))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{name: "Fake", answer: "<b>42</b>"}))
 	sender := &fakeSender{
 		failSendMessageIf: func(p *bot.SendMessageParams) bool {
 			return p.ParseMode == models.ParseModeHTML
@@ -224,7 +226,7 @@ func TestLLMHandler_FallsBackToPlainTextWhenHTMLRejected(t *testing.T) {
 
 func TestLLMHandler_TruncatesLongAnswer(t *testing.T) {
 	longAnswer := strings.Repeat("a", telegramMessageMaxRunes+100)
-	h := NewQuestionsHandler("anekbot", NewLLM(&fakeLLMProvider{name: "Fake", answer: longAnswer}))
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{name: "Fake", answer: longAnswer}))
 	sender := &fakeSender{}
 
 	update := &models.Update{Message: &models.Message{

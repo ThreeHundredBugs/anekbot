@@ -1,4 +1,4 @@
-package anekbot
+package logging
 
 import (
 	"bytes"
@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-func TestParseLogLevel(t *testing.T) {
+func TestParseLevel(t *testing.T) {
 	tests := []struct {
 		in      string
-		want    LogLevel
+		want    Level
 		wantErr bool
 	}{
 		{"trace", LevelTrace, false},
@@ -23,26 +23,26 @@ func TestParseLogLevel(t *testing.T) {
 		{"", 0, true},
 	}
 	for _, tt := range tests {
-		got, err := ParseLogLevel(tt.in)
+		got, err := ParseLevel(tt.in)
 		if tt.wantErr {
 			if err == nil {
-				t.Errorf("ParseLogLevel(%q): expected an error, got none", tt.in)
+				t.Errorf("ParseLevel(%q): expected an error, got none", tt.in)
 			}
 			continue
 		}
 		if err != nil {
-			t.Errorf("ParseLogLevel(%q): unexpected error: %v", tt.in, err)
+			t.Errorf("ParseLevel(%q): unexpected error: %v", tt.in, err)
 			continue
 		}
 		if got != tt.want {
-			t.Errorf("ParseLogLevel(%q) = %v, want %v", tt.in, got, tt.want)
+			t.Errorf("ParseLevel(%q) = %v, want %v", tt.in, got, tt.want)
 		}
 	}
 }
 
-func TestLogLevelFiltering(t *testing.T) {
-	orig := currentLogLevel
-	defer SetLogLevel(orig)
+func TestLevelFiltering(t *testing.T) {
+	orig := current
+	defer SetLevel(orig)
 
 	origOutput := log.Writer()
 	origFlags := log.Flags()
@@ -55,10 +55,10 @@ func TestLogLevelFiltering(t *testing.T) {
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
 
-	SetLogLevel(LevelWarn)
-	logTracef("trace msg")
-	logDebugf("debug msg")
-	logWarnf("warn msg")
+	SetLevel(LevelWarn)
+	Tracef("trace msg")
+	Debugf("debug msg")
+	Warnf("warn msg")
 	out := buf.String()
 	if strings.Contains(out, "trace msg") || strings.Contains(out, "debug msg") {
 		t.Errorf("expected trace/debug to be suppressed at warn level, got %q", out)
@@ -68,17 +68,17 @@ func TestLogLevelFiltering(t *testing.T) {
 	}
 
 	buf.Reset()
-	SetLogLevel(LevelTrace)
-	logTracef("trace msg")
-	logDebugf("debug msg")
-	logWarnf("warn msg")
+	SetLevel(LevelTrace)
+	Tracef("trace msg")
+	Debugf("debug msg")
+	Warnf("warn msg")
 	out = buf.String()
 	if !strings.Contains(out, "trace msg") || !strings.Contains(out, "debug msg") || !strings.Contains(out, "warn msg") {
 		t.Errorf("expected all levels to be logged at trace level, got %q", out)
 	}
 }
 
-// countingValue counts marshals, to prove asJSON defers encoding until logged.
+// countingValue counts marshals, to prove AsJSON defers encoding until logged.
 type countingValue struct {
 	Field        string `json:"field"`
 	marshalCount *int
@@ -92,8 +92,8 @@ func (c countingValue) MarshalJSON() ([]byte, error) {
 }
 
 func TestAsJSON_DefersEncodingUntilLogged(t *testing.T) {
-	orig := currentLogLevel
-	defer SetLogLevel(orig)
+	orig := current
+	defer SetLevel(orig)
 
 	origOutput := log.Writer()
 	origFlags := log.Flags()
@@ -109,16 +109,16 @@ func TestAsJSON_DefersEncodingUntilLogged(t *testing.T) {
 	count := 0
 	v := countingValue{Field: "hello", marshalCount: &count}
 
-	SetLogLevel(LevelWarn)
-	logTracef("value: %s", asJSON(v))
+	SetLevel(LevelWarn)
+	Tracef("value: %s", AsJSON(v))
 	if count != 0 {
-		t.Errorf("expected asJSON to not encode when trace logging is disabled, got %d encodes", count)
+		t.Errorf("expected AsJSON to not encode when trace logging is disabled, got %d encodes", count)
 	}
 
-	SetLogLevel(LevelTrace)
-	logTracef("value: %s", asJSON(v))
+	SetLevel(LevelTrace)
+	Tracef("value: %s", AsJSON(v))
 	if count != 1 {
-		t.Errorf("expected asJSON to encode exactly once when trace logging is enabled, got %d encodes", count)
+		t.Errorf("expected AsJSON to encode exactly once when trace logging is enabled, got %d encodes", count)
 	}
 	if !strings.Contains(buf.String(), `{"field":"hello"}`) {
 		t.Errorf("expected the log line to contain the JSON encoding, got %q", buf.String())

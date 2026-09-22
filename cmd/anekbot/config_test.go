@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
 func writeConfig(t *testing.T, content string) string {
@@ -115,6 +118,45 @@ func TestLoadConfig_LLMProviderKeysFromEnv(t *testing.T) {
 	}
 	if cfg.llmProviders[0].Name() != "Gemini" {
 		t.Errorf("first provider = %q, want Gemini (order must be kept)", cfg.llmProviders[0].Name())
+	}
+}
+
+func TestLoadConfig_LLMRateLimit(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `{"bot": {"token": "t"}, "llm": {"rate_limit": {
+		"max_concurrent": 4,
+		"per_user_limit": 2,
+		"per_user_window_seconds": 30,
+		"max_users": 100,
+		"prune_interval_seconds": 60
+	}}}`)
+
+	cfg, err := loadConfig([]string{"-config", path})
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	want := llm.Limits{
+		MaxConcurrent: 4,
+		PerUserLimit:  2,
+		PerUserWindow: 30 * time.Second,
+		MaxUsers:      100,
+		PruneInterval: 60 * time.Second,
+	}
+	if cfg.llmLimits != want {
+		t.Errorf("llmLimits = %+v, want %+v", cfg.llmLimits, want)
+	}
+}
+
+func TestLoadConfig_LLMRateLimit_DefaultsToZeroValue(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `{"bot": {"token": "t"}}`)
+
+	cfg, err := loadConfig([]string{"-config", path})
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.llmLimits != (llm.Limits{}) {
+		t.Errorf("llmLimits = %+v, want zero value (llm.New applies its own defaults)", cfg.llmLimits)
 	}
 }
 

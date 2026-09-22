@@ -14,7 +14,14 @@
     "providers": [
       { "type": "gemini", "model": "gemini-3.6-flash", "api_key_env": "GEMINI_API_KEY" },
       { "type": "huggingface", "model": "meta-llama/Llama-3.3-70B-Instruct", "api_key_env": "HF_API_KEY" }
-    ]
+    ],
+    "rate_limit": {
+      "max_concurrent": 16,
+      "per_user_limit": 5,
+      "per_user_window_seconds": 60,
+      "max_users": 100000,
+      "prune_interval_seconds": 1800
+    }
   },
 
   "anek": {

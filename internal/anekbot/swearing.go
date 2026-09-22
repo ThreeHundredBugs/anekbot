@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/logging"
 )
 
 //go:embed swearwords.txt
@@ -46,7 +48,7 @@ func (h *SwearingHandler) Handle(ctx context.Context, sender Sender, update *mod
 			continue
 		}
 
-		logDebugf("swearing handler: reacting to %q in chat_id=%d", word, msg.Chat.ID)
+		logging.Debugf("swearing handler: reacting to %q in chat_id=%d", word, msg.Chat.ID)
 		if _, err := sender.SetMessageReaction(ctx, &bot.SetMessageReactionParams{
 			ChatID:    msg.Chat.ID,
 			MessageID: msg.ID,
@@ -57,7 +59,7 @@ func (h *SwearingHandler) Handle(ctx context.Context, sender Sender, update *mod
 				},
 			},
 		}); err != nil {
-			logWarnf("swearing handler: set message reaction: %v", err)
+			logging.Warnf("swearing handler: set message reaction: %v", err)
 		}
 		return
 	}

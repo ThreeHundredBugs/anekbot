@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-telegram/bot/models"
 	"golang.org/x/text/encoding/charmap"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 )
 
 func newTestAnekHandler(t *testing.T, body string, randValue float64) (h *AnekHandler, lastQuery func() url.Values) {
@@ -254,7 +256,7 @@ func TestAnekHandler_HandleInline_WithQuery_ShowsPlaceholder(t *testing.T) {
 func TestAnekHandler_HandleChosenInlineResult_GeneratesAndEditsJoke(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}
-	h.SetLLM(NewLLM(&fakeLLMProvider{answer: "смешной анекдот"}))
+	h.SetLLM(NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "смешной анекдот"}))
 
 	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID:        aiJokeResultID,
@@ -308,7 +310,7 @@ func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenLLMNil(t *testing.T
 func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenProviderFails(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}
-	h.SetLLM(NewLLM(&fakeLLMProvider{err: errors.New("down")}))
+	h.SetLLM(NewLLM(llm.Limits{}, &fakeLLMProvider{err: errors.New("down")}))
 
 	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID:        aiJokeResultID,
@@ -329,7 +331,7 @@ func TestAnekHandler_HandleChosenInlineResult_UnavailableWhenProviderFails(t *te
 func TestAnekHandler_HandleChosenInlineResult_IgnoresOtherResults(t *testing.T) {
 	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
 	sender := &fakeSender{}
-	h.SetLLM(NewLLM(&fakeLLMProvider{answer: "смешной анекдот"}))
+	h.SetLLM(NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "смешной анекдот"}))
 
 	update := &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID:        "0", // one of the random-joke results, not the AI one
@@ -427,7 +429,7 @@ func TestAnekHandler_SetInline_AIJokesDisabledFallsBackToRegularJokes(t *testing
 		t.Fatalf("expected regular joke suggestions, got %+v", sender.inlineAnswers)
 	}
 
-	h.SetLLM(NewLLM(&fakeLLMProvider{answer: "x"}))
+	h.SetLLM(NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "x"}))
 	h.HandleChosenInlineResult(context.Background(), sender, &models.Update{ChosenInlineResult: &models.ChosenInlineResult{
 		ResultID: aiJokeResultID, Query: "cats", InlineMessageID: "m",
 	}})

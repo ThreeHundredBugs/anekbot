@@ -1,4 +1,4 @@
-package anekbot
+package logging
 
 import (
 	"encoding/json"
@@ -7,24 +7,24 @@ import (
 	"strings"
 )
 
-type LogLevel int
+type Level int
 
 const (
 	// LevelTrace logs every update the bot receives
-	LevelTrace LogLevel = iota
+	LevelTrace Level = iota
 	// LevelDebug logs the chat ID and username behind each update.
 	LevelDebug
 	// LevelWarn only logs things that went wrong. This is the default.
 	LevelWarn
 )
 
-var currentLogLevel = LevelWarn
+var current = LevelWarn
 
-func SetLogLevel(level LogLevel) {
-	currentLogLevel = level
+func SetLevel(level Level) {
+	current = level
 }
 
-func ParseLogLevel(s string) (LogLevel, error) {
+func ParseLevel(s string) (Level, error) {
 	switch strings.ToLower(s) {
 	case "trace":
 		return LevelTrace, nil
@@ -48,24 +48,24 @@ func (j jsonValue) String() string {
 	return string(data)
 }
 
-func asJSON(v any) fmt.Stringer {
+func AsJSON(v any) fmt.Stringer {
 	return jsonValue{v}
 }
 
-func logTracef(format string, args ...any) {
-	if currentLogLevel <= LevelTrace {
+func Tracef(format string, args ...any) {
+	if current <= LevelTrace {
 		log.Printf("TRACE "+format, args...)
 	}
 }
 
-func logDebugf(format string, args ...any) {
-	if currentLogLevel <= LevelDebug {
+func Debugf(format string, args ...any) {
+	if current <= LevelDebug {
 		log.Printf("DEBUG "+format, args...)
 	}
 }
 
-func logWarnf(format string, args ...any) {
-	if currentLogLevel <= LevelWarn {
+func Warnf(format string, args ...any) {
+	if current <= LevelWarn {
 		log.Printf("WARN "+format, args...)
 	}
 }

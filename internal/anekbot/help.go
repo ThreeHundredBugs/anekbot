@@ -7,6 +7,8 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/logging"
 )
 
 type HelpHandler struct {
@@ -55,13 +57,13 @@ func (h *HelpHandler) Handle(ctx context.Context, sender Sender, update *models.
 	if !h.commandPattern.MatchString(msg.Text) {
 		return
 	}
-	logDebugf("help handler: replying to /help in chat_id=%d", msg.Chat.ID)
+	logging.Debugf("help handler: replying to /help in chat_id=%d", msg.Chat.ID)
 
 	if _, err := sender.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          msg.Chat.ID,
 		Text:            h.text,
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
-		logWarnf("help handler: send message: %v", err)
+		logging.Warnf("help handler: send message: %v", err)
 	}
 }

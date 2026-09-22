@@ -10,6 +10,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"github.com/ThreeHundredBugs/anekbot/internal/llm"
+	"github.com/ThreeHundredBugs/anekbot/internal/logging"
 )
 
 type QuestionsHandler struct {
@@ -38,7 +39,7 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 	if !ok {
 		return
 	}
-	logDebugf("questions handler: answering question in chat_id=%d", msg.Chat.ID)
+	logging.Debugf("questions handler: answering question in chat_id=%d", msg.Chat.ID)
 
 	answer, providerName, err := h.llm.AskFor(ctx, userID(msg.From), question)
 	if err != nil {
@@ -47,7 +48,7 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 			Text:            llmUnavailableMessage,
 			ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 		}); sendErr != nil {
-			logWarnf("questions handler: send unavailable message: %v", sendErr)
+			logging.Warnf("questions handler: send unavailable message: %v", sendErr)
 		}
 		return
 	}
@@ -64,7 +65,7 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 	if err == nil {
 		return
 	}
-	logWarnf("questions handler: send message: %v", err)
+	logging.Warnf("questions handler: send message: %v", err)
 
 	// The model's HTML may be malformed; fall back to plain text rather than dropping the answer.
 	if _, err := sender.SendMessage(ctx, &bot.SendMessageParams{
@@ -72,7 +73,7 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 		Text:            answer,
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
-		logWarnf("questions handler: send plain-text fallback: %v", err)
+		logging.Warnf("questions handler: send plain-text fallback: %v", err)
 	}
 }
 

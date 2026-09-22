@@ -16,6 +16,7 @@ import (
 	"golang.org/x/text/encoding/charmap"
 
 	"github.com/ThreeHundredBugs/anekbot/internal/llm"
+	"github.com/ThreeHundredBugs/anekbot/internal/logging"
 )
 
 const (
@@ -91,11 +92,11 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 	if !strings.Contains(strings.ToLower(msg.Text), anekTrigger) {
 		return
 	}
-	logDebugf("anek handler: matched trigger in chat_id=%d", msg.Chat.ID)
+	logging.Debugf("anek handler: matched trigger in chat_id=%d", msg.Chat.ID)
 
 	joke, err := h.fetchJoke(ctx)
 	if err != nil {
-		logWarnf("anek handler: fetch joke: %v", err)
+		logging.Warnf("anek handler: fetch joke: %v", err)
 		return
 	}
 
@@ -104,7 +105,7 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 		Text:            joke,
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
-		logWarnf("anek handler: send message: %v", err)
+		logging.Warnf("anek handler: send message: %v", err)
 	}
 }
 
@@ -128,7 +129,7 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 			defer wg.Done()
 			joke, err := h.fetchJoke(ctx)
 			if err != nil {
-				logWarnf("anek handler: fetch joke for inline query: %v", err)
+				logging.Warnf("anek handler: fetch joke for inline query: %v", err)
 				return
 			}
 			jokes[i] = joke
@@ -149,13 +150,13 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 		})
 	}
 
-	logDebugf("anek handler: answering inline query with %d results", len(results))
+	logging.Debugf("anek handler: answering inline query with %d results", len(results))
 	if _, err := sender.AnswerInlineQuery(ctx, &bot.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
 		Results:       results,
 		CacheTime:     1, // 0 is indistinguishable from unset and gets dropped
 	}); err != nil {
-		logWarnf("anek handler: answer inline query: %v", err)
+		logging.Warnf("anek handler: answer inline query: %v", err)
 	}
 }
 
@@ -175,13 +176,13 @@ func (h *AnekHandler) answerAIJokePlaceholderInline(ctx context.Context, sender 
 		},
 	}
 
-	logDebugf("anek handler: answering inline query with AI-generate placeholder for topic %q", topic)
+	logging.Debugf("anek handler: answering inline query with AI-generate placeholder for topic %q", topic)
 	if _, err := sender.AnswerInlineQuery(ctx, &bot.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
 		Results:       []models.InlineQueryResult{result},
 		CacheTime:     inlineAICacheSeconds,
 	}); err != nil {
-		logWarnf("anek handler: answer inline query: %v", err)
+		logging.Warnf("anek handler: answer inline query: %v", err)
 	}
 }
 
@@ -206,10 +207,10 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 		return
 	}
 
-	logDebugf("anek handler: generating AI joke for topic %q", topic)
+	logging.Debugf("anek handler: generating AI joke for topic %q", topic)
 	joke, _, err := h.llm.AskFor(ctx, llm.UserID(chosen.From.ID), fmt.Sprintf(aiJokePromptTemplate, topic))
 	if err != nil {
-		logWarnf("anek handler: generate AI joke: %v", err)
+		logging.Warnf("anek handler: generate AI joke: %v", err)
 		h.editInlineMessage(ctx, sender, chosen.InlineMessageID, llmUnavailableMessage, false)
 		return
 	}
@@ -232,12 +233,12 @@ func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inli
 	}
 
 	if _, err := sender.EditMessageText(ctx, params); err != nil {
-		logWarnf("anek handler: edit message text: %v", err)
+		logging.Warnf("anek handler: edit message text: %v", err)
 		if tryHTML {
 			plain := *params
 			plain.ParseMode = ""
 			if _, err := sender.EditMessageText(ctx, &plain); err != nil {
-				logWarnf("anek handler: edit message text plain-text fallback: %v", err)
+				logging.Warnf("anek handler: edit message text plain-text fallback: %v", err)
 			}
 		}
 	}
@@ -253,7 +254,7 @@ func (h *AnekHandler) HandleCallback(ctx context.Context, sender Sender, update 
 	if _, err := sender.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: update.CallbackQuery.ID,
 	}); err != nil {
-		logWarnf("anek handler: answer callback query: %v", err)
+		logging.Warnf("anek handler: answer callback query: %v", err)
 	}
 }
 

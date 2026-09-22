@@ -43,6 +43,25 @@ func TestPerKeyLimiterQuotaResetsAfterWindow(t *testing.T) {
 	}
 }
 
+func TestPerKeyLimiterRefillsGraduallyNotAllAtOnce(t *testing.T) {
+	l := newTestLimiter()
+	now := time.Now()
+	l.Now = func() time.Time { return now }
+
+	for i := 0; i < l.Limit; i++ {
+		l.Allow(1)
+	}
+
+	// Halfway through the window, only ~half the tokens (1 of 3) should be back.
+	now = now.Add(l.Window / 2)
+	if !l.Allow(1) {
+		t.Fatal("expected one token to be available halfway through the window")
+	}
+	if l.Allow(1) {
+		t.Fatal("expected only one token to have refilled halfway through the window")
+	}
+}
+
 func TestPerKeyLimiterSweepsExpiredEntriesAfterPruneInterval(t *testing.T) {
 	l := newTestLimiter()
 	now := time.Now()
@@ -83,7 +102,7 @@ func TestPerKeyLimiterEvictsOldestWhenMaxKeysExceeded(t *testing.T) {
 		t.Fatalf("Len() after eviction = %d, want %d", got, l.MaxKeys)
 	}
 	l.mu.Lock()
-	_, stillThere := l.windows[0]
+	_, stillThere := l.buckets[0]
 	l.mu.Unlock()
 	if stillThere {
 		t.Fatal("oldest key (0) should have been evicted")

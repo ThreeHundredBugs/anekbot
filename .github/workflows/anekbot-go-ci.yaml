@@ -4,19 +4,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - cmd/**
-      - internal/**
-      - go.mod
-      - go.sum
-      - .github/workflows/anekbot-go-ci.yaml
   pull_request:
-    paths:
-      - cmd/**
-      - internal/**
-      - go.mod
-      - go.sum
-      - .github/workflows/anekbot-go-ci.yaml
 
 concurrency:
   group: anekbot-ci-${{github.ref}}

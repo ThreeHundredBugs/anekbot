@@ -33,7 +33,7 @@ func (f *fakeProvider) Ask(_ context.Context, systemPrompt, question string) (st
 
 func TestAskPassesSystemPromptToProvider(t *testing.T) {
 	provider := &fakeProvider{name: "Fake", answer: "ok"}
-	l := New("be nice", provider)
+	l := New("be nice", Limits{}, provider)
 
 	if _, _, err := l.Ask(context.Background(), "hi"); err != nil {
 		t.Fatalf("Ask: %v", err)
@@ -50,7 +50,7 @@ func TestAskUsesFirstWorkingProvider(t *testing.T) {
 	first := &fakeProvider{name: "First", err: errors.New("down")}
 	second := &fakeProvider{name: "Second", err: errors.New("down")}
 	third := &fakeProvider{name: "Third", answer: "ok"}
-	l := New("prompt", first, second, third)
+	l := New("prompt", Limits{}, first, second, third)
 
 	answer, name, err := l.Ask(context.Background(), "q")
 	if err != nil || answer != "ok" || name != "Third" {
@@ -64,8 +64,9 @@ func TestAskUsesFirstWorkingProvider(t *testing.T) {
 }
 
 func TestAskForEnforcesPerUserQuota(t *testing.T) {
-	l := New("prompt", &fakeProvider{answer: "ok"})
-	for i := 0; i < userLimit; i++ {
+	const perUserLimit = 3
+	l := New("prompt", Limits{PerUserLimit: perUserLimit}, &fakeProvider{answer: "ok"})
+	for i := 0; i < perUserLimit; i++ {
 		if _, _, err := l.AskFor(context.Background(), 1, "q"); err != nil {
 			t.Fatalf("request %d: unexpected error %v", i, err)
 		}
@@ -79,7 +80,8 @@ func TestAskForEnforcesPerUserQuota(t *testing.T) {
 }
 
 func TestAskForRejectsWhenAllSlotsBusy(t *testing.T) {
-	l := New("prompt", &fakeProvider{answer: "ok"})
+	const maxConcurrent = 2
+	l := New("prompt", Limits{MaxConcurrent: maxConcurrent}, &fakeProvider{answer: "ok"})
 	var releases []func()
 	for i := 0; i < maxConcurrent; i++ {
 		release, ok := l.concurrency.TryAcquire()

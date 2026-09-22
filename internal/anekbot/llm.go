@@ -18,8 +18,8 @@ const llmSystemPrompt = "You are a helpful assistant replying in a Telegram chat
 	"If you need to format, reply as Telegram HTML: only <b>, <i>, <u>, <s>, <code>, <pre> and <a href=\"...\"> tags are " +
 	"supported, no other tags or Markdown syntax. Escape any literal <, > and & that aren't part of a tag."
 
-func NewLLM(providers ...llm.Provider) *llm.LLM {
-	return llm.New(llmSystemPrompt, providers...)
+func NewLLM(limits llm.Limits, providers ...llm.Provider) *llm.LLM {
+	return llm.New(llmSystemPrompt, limits, providers...)
 }
 
 func truncateToRunes(s string, max int) string {

@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// PerKeyLimiter enforces a sliding-window request quota per key. It also bounds its own
-// memory: expired entries are swept periodically, and if distinct keys still exceed MaxKeys
-// afterwards, the oldest entries are evicted regardless of expiry.
+// PerKeyLimiter is a per-key token bucket: each key holds up to Limit tokens, refilling
+// continuously at Limit/Window per second, and each Allow call costs one token. It also
+// bounds its own memory: expired entries are swept periodically, and if distinct keys still
+// exceed MaxKeys afterwards, the oldest entries are evicted regardless of expiry.
 type PerKeyLimiter[K comparable] struct {
 	Limit  int
 	Window time.Duration
@@ -18,43 +19,54 @@ type PerKeyLimiter[K comparable] struct {
 	Now func() time.Time
 
 	mu        sync.Mutex
-	windows   map[K]window
+	buckets   map[K]bucket
 	lastPrune time.Time
 }
 
-type window struct {
-	start time.Time
-	count int
+type bucket struct {
+	tokens     float64
+	lastRefill time.Time
 }
 
-// Allow reports whether key is still under its per-window quota, counting this call if so.
+// Allow reports whether key has a token available, spending it if so.
 func (l *PerKeyLimiter[K]) Allow(key K) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.windows == nil {
-		l.windows = make(map[K]window)
+	if l.buckets == nil {
+		l.buckets = make(map[K]bucket)
 	}
 	now := l.nowLocked()
 
-	if now.Sub(l.lastPrune) >= l.PruneInterval || len(l.windows) >= l.MaxKeys {
+	if now.Sub(l.lastPrune) >= l.PruneInterval || len(l.buckets) >= l.MaxKeys {
 		l.expireLocked(now)
 		l.lastPrune = now
 	}
-	if len(l.windows) >= l.MaxKeys {
-		l.evictOldestLocked(len(l.windows) - l.MaxKeys + 1)
+	if len(l.buckets) >= l.MaxKeys {
+		l.evictOldestLocked(len(l.buckets) - l.MaxKeys + 1)
 	}
 
-	w := l.windows[key]
-	if now.Sub(w.start) >= l.Window {
-		w = window{start: now}
-	}
-	if w.count >= l.Limit {
+	b := l.refillLocked(key, now)
+	if b.tokens < 1 {
+		l.buckets[key] = b
 		return false
 	}
-	w.count++
-	l.windows[key] = w
+	b.tokens--
+	l.buckets[key] = b
 	return true
+}
+
+// refillLocked returns key's bucket brought up to date as of now. l.mu must be held.
+func (l *PerKeyLimiter[K]) refillLocked(key K, now time.Time) bucket {
+	b, ok := l.buckets[key]
+	if !ok {
+		return bucket{tokens: float64(l.Limit), lastRefill: now}
+	}
+	elapsed := now.Sub(b.lastRefill).Seconds()
+	rate := float64(l.Limit) / l.Window.Seconds()
+	b.tokens = min(float64(l.Limit), b.tokens+elapsed*rate)
+	b.lastRefill = now
+	return b
 }
 
 func (l *PerKeyLimiter[K]) nowLocked() time.Time {
@@ -64,33 +76,35 @@ func (l *PerKeyLimiter[K]) nowLocked() time.Time {
 	return time.Now()
 }
 
-// expireLocked removes every window that ended before now. l.mu must be held.
+// expireLocked removes every bucket that would be full again by now (elapsed >= Window),
+// since resuming it then behaves identically to starting fresh. l.mu must be held.
 func (l *PerKeyLimiter[K]) expireLocked(now time.Time) {
-	for key, w := range l.windows {
-		if now.Sub(w.start) >= l.Window {
-			delete(l.windows, key)
+	for key, b := range l.buckets {
+		if now.Sub(b.lastRefill) >= l.Window {
+			delete(l.buckets, key)
 		}
 	}
 }
 
-// evictOldestLocked removes the n oldest-started windows regardless of expiry. l.mu must be held.
+// evictOldestLocked removes the n least-recently-refilled buckets regardless of expiry.
+// l.mu must be held.
 func (l *PerKeyLimiter[K]) evictOldestLocked(n int) {
 	if n <= 0 {
 		return
 	}
 	for n > 0 {
 		var oldestKey K
-		var oldestStart time.Time
+		var oldestRefill time.Time
 		found := false
-		for key, w := range l.windows {
-			if !found || w.start.Before(oldestStart) {
-				oldestKey, oldestStart, found = key, w.start, true
+		for key, b := range l.buckets {
+			if !found || b.lastRefill.Before(oldestRefill) {
+				oldestKey, oldestRefill, found = key, b.lastRefill, true
 			}
 		}
 		if !found {
 			return
 		}
-		delete(l.windows, oldestKey)
+		delete(l.buckets, oldestKey)
 		n--
 	}
 }
@@ -99,5 +113,5 @@ func (l *PerKeyLimiter[K]) evictOldestLocked(n int) {
 func (l *PerKeyLimiter[K]) Len() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return len(l.windows)
+	return len(l.buckets)
 }

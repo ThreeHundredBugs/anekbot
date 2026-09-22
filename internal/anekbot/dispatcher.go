@@ -9,6 +9,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"github.com/ThreeHundredBugs/anekbot/internal/llm"
+	"github.com/ThreeHundredBugs/anekbot/internal/logging"
 )
 
 type Sender interface {
@@ -45,12 +46,12 @@ func (d *Dispatcher) SetHelp(help *HelpHandler) {
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
-	logTracef("dispatcher: received update: %s", asJSON(update))
+	logging.Tracef("dispatcher: received update: %s", logging.AsJSON(update))
 
 	switch {
 	case update.Message != nil:
 		msg := update.Message
-		logDebugf("dispatcher: message from chat_id=%d user=%s", msg.Chat.ID, userLabel(msg.From))
+		logging.Debugf("dispatcher: message from chat_id=%d user=%s", msg.Chat.ID, userLabel(msg.From))
 
 		var handlers []Handler
 		if d.anek != nil {
@@ -71,27 +72,27 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		for _, h := range handlers {
 			go func(h Handler) {
 				defer wg.Done()
-				logDebugf("dispatcher: firing %s handler", h.Name())
+				logging.Debugf("dispatcher: firing %s handler", h.Name())
 				h.Handle(ctx, sender, update)
 			}(h)
 		}
 		wg.Wait()
 	case update.InlineQuery != nil:
-		logDebugf("dispatcher: inline query from user=%s", userLabel(update.InlineQuery.From))
+		logging.Debugf("dispatcher: inline query from user=%s", userLabel(update.InlineQuery.From))
 		if d.anek != nil {
-			logDebugf("dispatcher: firing %s inline handler", d.anek.Name())
+			logging.Debugf("dispatcher: firing %s inline handler", d.anek.Name())
 			d.anek.HandleInline(ctx, sender, update)
 		}
 	case update.ChosenInlineResult != nil:
-		logDebugf("dispatcher: chosen inline result from user=%s", userLabel(&update.ChosenInlineResult.From))
+		logging.Debugf("dispatcher: chosen inline result from user=%s", userLabel(&update.ChosenInlineResult.From))
 		if d.anek != nil {
-			logDebugf("dispatcher: firing %s chosen-inline-result handler", d.anek.Name())
+			logging.Debugf("dispatcher: firing %s chosen-inline-result handler", d.anek.Name())
 			d.anek.HandleChosenInlineResult(ctx, sender, update)
 		}
 	case update.CallbackQuery != nil:
-		logDebugf("dispatcher: callback query from user=%s", userLabel(&update.CallbackQuery.From))
+		logging.Debugf("dispatcher: callback query from user=%s", userLabel(&update.CallbackQuery.From))
 		if d.anek != nil {
-			logDebugf("dispatcher: firing %s callback handler", d.anek.Name())
+			logging.Debugf("dispatcher: firing %s callback handler", d.anek.Name())
 			d.anek.HandleCallback(ctx, sender, update)
 		}
 	}
