@@ -28,7 +28,7 @@ func buildHelpText(botUsername string, anekEnabled, swearingEnabled, llmEnabled 
 	b.WriteString("Вот что я умею:\n")
 
 	if anekEnabled {
-		b.WriteString("\n- Напишите «анек!» в сообщении — пришлю случайный анекдот.")
+		b.WriteString("\n- Напишите «анек!» в сообщении или отправьте /анек — пришлю случайный анекдот.")
 		b.WriteString("\n- Наберите @" + botUsername + " в любом чате (инлайн-режим), чтобы получить анекдот, не отправляя сообщение.")
 	}
 	if swearingEnabled {

@@ -86,6 +86,11 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 }
 
 func (h *QuestionsHandler) extractQuestion(text string) (question string, ok bool) {
+	if strings.HasPrefix(text, "/") {
+		// message is command, don't answer it, if it's like /command@mybot
+		return "", false
+	}
+
 	loc := h.mentionPattern.FindStringIndex(text)
 	if loc == nil {
 		return "", false

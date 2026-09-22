@@ -75,6 +75,13 @@ func formatStats(snap stats.Snapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Всего анеков: %d\nИИ-анеков: %d\nПользователей: %d\n", snap.TotalAneks, snap.TotalAIAneks, snap.TotalUsers)
 
+	fmt.Fprintf(&b, "\nВопросы к ИИ: %d\nРеакции на мат: %d\nПромо показано: %d\n",
+		snap.QuestionsAnswered, snap.SwearingReactions, snap.PromotionsShown)
+
+	fmt.Fprintf(&b, "\nЗапросы к ИИ: %d успешно, %d с ошибкой\nFallback-провайдер сработал: %d раз\nСейчас выполняется: %d\nОтказано по лимиту: %d на пользователя, %d по параллелизму\n",
+		snap.LLMRequestsOK, snap.LLMRequestsError, snap.LLMFallbacks, snap.LLMConcurrencyInUse,
+		snap.RateLimitRejectionsPerUser, snap.RateLimitRejectionsConcurrency)
+
 	if len(snap.TopUsers) == 0 {
 		b.WriteString("\nТоп пользователей: пока нет данных.")
 		return b.String()

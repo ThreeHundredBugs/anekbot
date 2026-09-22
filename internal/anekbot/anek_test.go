@@ -35,9 +35,10 @@ func newTestAnekHandler(t *testing.T, body string, randValue float64) (h *AnekHa
 	t.Cleanup(server.Close)
 
 	h = &AnekHandler{
-		client:    server.Client(),
-		baseURL:   server.URL,
-		randFloat: func() float64 { return randValue },
+		client:         server.Client(),
+		baseURL:        server.URL,
+		randFloat:      func() float64 { return randValue },
+		commandPattern: anekCommandPattern(""),
 	}
 	lastQuery = func() url.Values {
 		mu.Lock()
@@ -111,6 +112,93 @@ func TestAnekHandler_CaseInsensitiveSubstring(t *testing.T) {
 
 	if len(sender.sentMessages) != 1 {
 		t.Fatalf("expected trigger to match case-insensitively, got %d messages", len(sender.sentMessages))
+	}
+}
+
+func TestAnekHandler_SlashCommand(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "/анек",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 1 {
+		t.Fatalf("expected /анек to trigger a joke like анек!, got %d messages", len(sender.sentMessages))
+	}
+}
+
+func TestAnekHandler_SlashCommandCaseInsensitiveWithTrailingText(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "/АНЕК пожалуйста",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 1 {
+		t.Errorf("expected the command to match case-insensitively with trailing text, got %d messages", len(sender.sentMessages))
+	}
+}
+
+func TestAnekHandler_SlashCommandWithBotUsername(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	h.SetBotUsername("anekbot")
+	sender := &fakeSender{}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "/анек@anekbot",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 1 {
+		t.Fatalf("expected /анек@<botusername> to trigger a joke, got %d messages", len(sender.sentMessages))
+	}
+}
+
+func TestAnekHandler_SlashCommandWrongBotIgnored(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	h.SetBotUsername("anekbot")
+	sender := &fakeSender{}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "/анек@someotherbot",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 0 {
+		t.Errorf("expected a command addressed to a different bot to be ignored, got %d messages", len(sender.sentMessages))
+	}
+}
+
+func TestAnekHandler_SlashCommandPrefixDoesNotFalselyMatch(t *testing.T) {
+	h, _ := newTestAnekHandler(t, `{"content":"joke"}`, 0.1)
+	sender := &fakeSender{}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "/анекдот",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 0 {
+		t.Errorf("expected /анекдот not to match the /анек command, got %d messages", len(sender.sentMessages))
 	}
 }
 

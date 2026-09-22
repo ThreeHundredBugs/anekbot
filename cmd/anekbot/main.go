@@ -89,6 +89,7 @@ func main() {
 	}
 	if anek != nil {
 		anek.SetLLM(llmClient)
+		anek.SetBotUsername(me.Username)
 	}
 	hasQuestions := llmClient != nil && cfg.questionsEnabled
 	if hasQuestions {

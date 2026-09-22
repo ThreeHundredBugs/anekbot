@@ -23,10 +23,16 @@ type Stats struct {
 	promotionsShown     *metrics.Counter
 	questionsAnswered   *metrics.Counter
 	llmConcurrencyInUse *metrics.Gauge
-	uniqueUsers         *metrics.Gauge
+	// trackedUsers mirrors len(perUser); capped at maxTrackedUsers, so it's not a true
+	// distinct-user count once that cap is reached.
+	trackedUsers *metrics.Gauge
 
-	totalAneksClassic atomic.Int64
-	totalAneksAI      atomic.Int64
+	totalAneksClassic    atomic.Int64
+	totalAneksAI         atomic.Int64
+	llmRequestsOK        atomic.Int64
+	llmRequestsError     atomic.Int64
+	rateLimitPerUser     atomic.Int64
+	rateLimitConcurrency atomic.Int64
 
 	mu      sync.Mutex
 	perUser map[UserID]*userCount
@@ -51,7 +57,7 @@ func New() *Stats {
 		questionsAnswered: set.NewCounter("anekbot_questions_answered_total"),
 	}
 	s.llmConcurrencyInUse = set.NewGauge("anekbot_llm_concurrency_in_use", nil)
-	s.uniqueUsers = set.NewGauge("anekbot_unique_users", nil)
+	s.trackedUsers = set.NewGauge("anekbot_tracked_users", nil)
 	return s
 }
 
@@ -102,6 +108,11 @@ func (s *Stats) ObserveRequest(provider string, ok bool, duration time.Duration)
 	}
 	s.set.GetOrCreateCounter(labeled("anekbot_llm_requests_total", "provider", provider, "status", status)).Inc()
 	s.set.GetOrCreateHistogram(labeled("anekbot_llm_request_duration_seconds", "provider", provider)).Update(duration.Seconds())
+	if ok {
+		s.llmRequestsOK.Add(1)
+	} else {
+		s.llmRequestsError.Add(1)
+	}
 }
 
 func (s *Stats) ObserveFallback() {
@@ -116,6 +127,11 @@ func (s *Stats) ObserveRateLimitRejection(scope string) {
 		return
 	}
 	s.set.GetOrCreateCounter(labeled("anekbot_rate_limit_rejections_total", "scope", scope)).Inc()
+	if scope == "concurrency" {
+		s.rateLimitConcurrency.Add(1)
+	} else {
+		s.rateLimitPerUser.Add(1)
+	}
 }
 
 func (s *Stats) IncConcurrency() {
@@ -130,6 +146,10 @@ func (s *Stats) DecConcurrency() {
 	}
 }
 
+// maxTrackedUsers bounds perUser's memory: without a cap, a distinct entry accumulates for
+// every user who ever triggers a joke and is never evicted, growing forever.
+const maxTrackedUsers = 100
+
 func (s *Stats) recordUser(user UserID, username string) {
 	if user == 0 {
 		return
@@ -137,16 +157,40 @@ func (s *Stats) recordUser(user UserID, username string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	uc, ok := s.perUser[user]
-	if !ok {
-		uc = &userCount{}
-		s.perUser[user] = uc
-		s.uniqueUsers.Set(float64(len(s.perUser)))
+	if uc, ok := s.perUser[user]; ok {
+		if username != "" {
+			uc.username = username
+		}
+		uc.count++
+		return
 	}
-	if username != "" {
-		uc.username = username
+
+	if len(s.perUser) >= maxTrackedUsers {
+		// Space-Saving algorithm: evict the least-active tracked user and seed the
+		// newcomer at the evicted count + 1, so a genuinely active new user can still
+		// climb into the top N instead of being permanently locked out once the table
+		// fills up. This makes counts for users that enter this way approximate (an
+		// overestimate, never an undercount), which is fine for an admin-facing leaderboard.
+		minUser, minCount := s.minTrackedLocked()
+		delete(s.perUser, minUser)
+		s.perUser[user] = &userCount{username: username, count: minCount + 1}
+		return
 	}
-	uc.count++
+
+	s.perUser[user] = &userCount{username: username, count: 1}
+	s.trackedUsers.Set(float64(len(s.perUser)))
+}
+
+// minTrackedLocked returns the tracked user with the lowest count. s.mu must be held, and
+// s.perUser must be non-empty.
+func (s *Stats) minTrackedLocked() (user UserID, count int64) {
+	first := true
+	for id, uc := range s.perUser {
+		if first || uc.count < count {
+			user, count, first = id, uc.count, false
+		}
+	}
+	return user, count
 }
 
 type UserTotal struct {
@@ -158,8 +202,20 @@ type UserTotal struct {
 type Snapshot struct {
 	TotalAneks   int64
 	TotalAIAneks int64
-	TotalUsers   int
-	TopUsers     []UserTotal
+	// TotalUsers is capped at maxTrackedUsers; see recordUser.
+	TotalUsers int
+	TopUsers   []UserTotal
+
+	QuestionsAnswered int64
+	SwearingReactions int64
+	PromotionsShown   int64
+
+	LLMRequestsOK                  int64
+	LLMRequestsError               int64
+	LLMFallbacks                   int64
+	LLMConcurrencyInUse            int64
+	RateLimitRejectionsPerUser     int64
+	RateLimitRejectionsConcurrency int64
 }
 
 // Snapshot returns current totals and the topN users by recorded anek count. s may be nil.
@@ -189,6 +245,17 @@ func (s *Stats) Snapshot(topN int) Snapshot {
 		TotalAIAneks: s.totalAneksAI.Load(),
 		TotalUsers:   len(s.perUser),
 		TopUsers:     totals,
+
+		QuestionsAnswered: int64(s.questionsAnswered.Get()),
+		SwearingReactions: int64(s.swearingReactions.Get()),
+		PromotionsShown:   int64(s.promotionsShown.Get()),
+
+		LLMRequestsOK:                  s.llmRequestsOK.Load(),
+		LLMRequestsError:               s.llmRequestsError.Load(),
+		LLMFallbacks:                   int64(s.llmFallbackTotal.Get()),
+		LLMConcurrencyInUse:            int64(s.llmConcurrencyInUse.Get()),
+		RateLimitRejectionsPerUser:     s.rateLimitPerUser.Load(),
+		RateLimitRejectionsConcurrency: s.rateLimitConcurrency.Load(),
 	}
 }
 

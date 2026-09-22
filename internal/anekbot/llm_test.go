@@ -97,6 +97,23 @@ func TestLLMHandler_NoMention(t *testing.T) {
 	}
 }
 
+func TestLLMHandler_IgnoresSlashCommandWithMention(t *testing.T) {
+	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "fact"}))
+	sender := &fakeSender{}
+
+	update := &models.Update{Message: &models.Message{
+		ID:   1,
+		Chat: models.Chat{ID: 1},
+		Text: "/анек@anekbot",
+	}}
+
+	h.Handle(context.Background(), sender, update)
+
+	if len(sender.sentMessages) != 0 {
+		t.Errorf("expected a bot command like /анек@anekbot not to be treated as a question, got %d messages", len(sender.sentMessages))
+	}
+}
+
 func TestLLMHandler_MentionWithoutQuestion(t *testing.T) {
 	h := NewQuestionsHandler("anekbot", NewLLM(llm.Limits{}, &fakeLLMProvider{answer: "fact"}))
 	sender := &fakeSender{}

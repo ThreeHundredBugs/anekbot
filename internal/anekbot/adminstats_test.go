@@ -130,3 +130,28 @@ func TestFormatStats_NoDataYet(t *testing.T) {
 		t.Errorf("text = %q, want a no-data message for an empty snapshot", text)
 	}
 }
+
+func TestFormatStats_IncludesActivityAndLLMCounters(t *testing.T) {
+	// Distinct, hard-to-collide values: each should appear exactly once, at its own field's
+	// spot in the formatted text.
+	text := formatStats(stats.Snapshot{
+		QuestionsAnswered:              301,
+		SwearingReactions:              402,
+		PromotionsShown:                503,
+		LLMRequestsOK:                  604,
+		LLMRequestsError:               705,
+		LLMFallbacks:                   806,
+		LLMConcurrencyInUse:            907,
+		RateLimitRejectionsPerUser:     1008,
+		RateLimitRejectionsConcurrency: 1109,
+	})
+	for _, want := range []string{
+		"Вопросы к ИИ: 301", "Реакции на мат: 402", "Промо показано: 503",
+		"604 успешно, 705 с ошибкой", "Fallback-провайдер сработал: 806",
+		"Сейчас выполняется: 907", "Отказано по лимиту: 1008 на пользователя, 1109 по параллелизму",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text = %q, want it to contain %q", text, want)
+		}
+	}
+}

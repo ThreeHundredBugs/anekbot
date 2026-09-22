@@ -64,6 +64,92 @@ func TestRecordAnek_ZeroUserIDNotTracked(t *testing.T) {
 	}
 }
 
+func TestRecordAnek_CapsTrackedUsersAtMax(t *testing.T) {
+	s := New()
+	for i := 1; i <= maxTrackedUsers+10; i++ {
+		s.RecordAnek(UserID(i), "", "message", "classic")
+	}
+
+	snap := s.Snapshot(maxTrackedUsers + 10)
+	if snap.TotalUsers != maxTrackedUsers {
+		t.Errorf("TotalUsers = %d, want capped at %d", snap.TotalUsers, maxTrackedUsers)
+	}
+	if len(snap.TopUsers) != maxTrackedUsers {
+		t.Errorf("TopUsers = %d entries, want %d", len(snap.TopUsers), maxTrackedUsers)
+	}
+}
+
+func TestRecordAnek_ActiveNewUserDisplacesLeastActiveOnceFull(t *testing.T) {
+	s := New()
+	// Fill the table with one-off users (count 1 each).
+	for i := 1; i <= maxTrackedUsers; i++ {
+		s.RecordAnek(UserID(i), "", "message", "classic")
+	}
+	// A returning user keeps building up a real count well above everyone else's.
+	const heavyUser UserID = maxTrackedUsers + 1
+	for i := 0; i < 5; i++ {
+		s.RecordAnek(heavyUser, "heavy", "message", "classic")
+	}
+
+	snap := s.Snapshot(1)
+	if len(snap.TopUsers) != 1 || snap.TopUsers[0].UserID != heavyUser {
+		t.Fatalf("TopUsers[0] = %+v, want the heavy user to have displaced a one-off entry", snap.TopUsers)
+	}
+	if snap.TopUsers[0].Count < 5 {
+		t.Errorf("heavy user's count = %d, want at least the 5 real hits", snap.TopUsers[0].Count)
+	}
+	if snap.TotalUsers != maxTrackedUsers {
+		t.Errorf("TotalUsers = %d, want it to stay capped at %d after displacement", snap.TotalUsers, maxTrackedUsers)
+	}
+}
+
+func TestSnapshot_LLMAndActivityCounters(t *testing.T) {
+	s := New()
+	s.RecordQuestionAnswered(1, "alice")
+	s.RecordSwearingReaction()
+	s.RecordSwearingReaction()
+	s.RecordPromotionShown()
+
+	s.IncConcurrency()
+	s.ObserveRequest("Gemini", true, time.Millisecond)
+	s.ObserveRequest("Gemini", false, time.Millisecond)
+	s.ObserveFallback()
+	s.DecConcurrency()
+
+	s.ObserveRateLimitRejection("per_user")
+	s.ObserveRateLimitRejection("per_user")
+	s.ObserveRateLimitRejection("concurrency")
+
+	snap := s.Snapshot(10)
+	if snap.QuestionsAnswered != 1 {
+		t.Errorf("QuestionsAnswered = %d, want 1", snap.QuestionsAnswered)
+	}
+	if snap.SwearingReactions != 2 {
+		t.Errorf("SwearingReactions = %d, want 2", snap.SwearingReactions)
+	}
+	if snap.PromotionsShown != 1 {
+		t.Errorf("PromotionsShown = %d, want 1", snap.PromotionsShown)
+	}
+	if snap.LLMRequestsOK != 1 {
+		t.Errorf("LLMRequestsOK = %d, want 1", snap.LLMRequestsOK)
+	}
+	if snap.LLMRequestsError != 1 {
+		t.Errorf("LLMRequestsError = %d, want 1", snap.LLMRequestsError)
+	}
+	if snap.LLMFallbacks != 1 {
+		t.Errorf("LLMFallbacks = %d, want 1", snap.LLMFallbacks)
+	}
+	if snap.LLMConcurrencyInUse != 0 {
+		t.Errorf("LLMConcurrencyInUse = %d, want 0 (balanced Inc/Dec)", snap.LLMConcurrencyInUse)
+	}
+	if snap.RateLimitRejectionsPerUser != 2 {
+		t.Errorf("RateLimitRejectionsPerUser = %d, want 2", snap.RateLimitRejectionsPerUser)
+	}
+	if snap.RateLimitRejectionsConcurrency != 1 {
+		t.Errorf("RateLimitRejectionsConcurrency = %d, want 1", snap.RateLimitRejectionsConcurrency)
+	}
+}
+
 func TestNilStats_MethodsAreNoops(t *testing.T) {
 	var s *Stats
 	s.RecordAnek(1, "alice", "message", "classic")

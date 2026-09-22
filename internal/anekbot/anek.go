@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 
 const (
 	anekTrigger    = "анек!"
+	anekCommand    = "анек"
 	defaultBaseURL = "http://rzhunemogu.ru"
 
 	// http://rzhunemogu.ru/FAQ.aspx
@@ -46,15 +48,16 @@ const (
 const aiJokePromptTemplate = "Придумай короткий анекдот на русском языке на тему: %s. " +
 	"Ответь только текстом анекдота, без вступлений, пояснений и кавычек."
 
-const aiJokeGeneratingMessage = "Генерирую анек с помощью ИИ, подождите немного…"
+const aiJokeGeneratingMessage = "Генерирую ИИ-анек, подождите немного…"
 
 type AnekHandler struct {
-	client    *http.Client
-	baseURL   string
-	randFloat func() float64
-	promos    *Promotions
-	llm       *llm.LLM
-	stats     *stats.Stats
+	client         *http.Client
+	baseURL        string
+	randFloat      func() float64
+	promos         *Promotions
+	llm            *llm.LLM
+	stats          *stats.Stats
+	commandPattern *regexp.Regexp
 
 	inlineDisabled  bool
 	aiJokesDisabled bool
@@ -62,10 +65,25 @@ type AnekHandler struct {
 
 func NewAnekHandler() *AnekHandler {
 	return &AnekHandler{
-		client:    &http.Client{Timeout: 10 * time.Second},
-		baseURL:   defaultBaseURL,
-		randFloat: rand.Float64,
+		client:         &http.Client{Timeout: 10 * time.Second},
+		baseURL:        defaultBaseURL,
+		randFloat:      rand.Float64,
+		commandPattern: anekCommandPattern(""),
 	}
+}
+
+// lets /анек@botUsername match too, alongside a bare /анек
+func (h *AnekHandler) SetBotUsername(botUsername string) {
+	h.commandPattern = anekCommandPattern(botUsername)
+}
+
+func anekCommandPattern(botUsername string) *regexp.Regexp {
+	pattern := `(?i)^/` + anekCommand
+	if botUsername != "" {
+		pattern += `(?:@` + regexp.QuoteMeta(botUsername) + `)?`
+	}
+	pattern += `(?:\s|$)`
+	return regexp.MustCompile(pattern)
 }
 
 func (h *AnekHandler) SetPromotions(p *Promotions) {
@@ -95,7 +113,7 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 	}
 	msg := update.Message
 
-	if !strings.Contains(strings.ToLower(msg.Text), anekTrigger) {
+	if !strings.Contains(strings.ToLower(msg.Text), anekTrigger) && !h.commandPattern.MatchString(msg.Text) {
 		return
 	}
 	logging.Debugf("anek handler: matched trigger in chat_id=%d", msg.Chat.ID)
