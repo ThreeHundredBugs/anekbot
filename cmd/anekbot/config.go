@@ -1,0 +1,257 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/ThreeHundredBugs/anekbot/internal/anekbot"
+	"github.com/ThreeHundredBugs/anekbot/internal/llm"
+	"github.com/ThreeHundredBugs/anekbot/internal/logging"
+)
+
+type config struct {
+	botToken      string
+	mode          string
+	logLevel      string
+	port          string
+	webhookPath   string
+	webhookSecret string
+
+	metricsEnabled bool
+	metricsPath    string
+	metricsToken   string
+
+	// adminUsernames are Telegram @handles (no "@")
+	adminUsernames []string
+
+	// llmProviders is tried in order; empty means no LLM.
+	llmProviders []llm.Provider
+	llmLimits    llm.Limits
+
+	anekEnabled       bool
+	inlineEnabled     bool
+	aiJokesEnabled    bool
+	promotions        *anekbot.Promotions
+	questionsEnabled  bool
+	swearingEnabled   bool
+	swearingWordsFile string
+}
+
+type fileConfig struct {
+	Bot struct {
+		Token    string `json:"token"`
+		Mode     string `json:"mode"`
+		LogLevel string `json:"log_level"`
+	} `json:"bot"`
+	Server struct {
+		Port          string `json:"port"`
+		WebhookPath   string `json:"webhook_path"`
+		WebhookSecret string `json:"webhook_secret"`
+	} `json:"server"`
+	Metrics struct {
+		Enabled *bool  `json:"enabled"`
+		Path    string `json:"path"`
+		Token   string `json:"token"`
+	} `json:"metrics"`
+	Admin struct {
+		// Usernames are Telegram @handles trusted with the /stats command.
+		Usernames []string `json:"usernames"`
+	} `json:"admin"`
+	LLM struct {
+		Providers []providerConfig `json:"providers"`
+		RateLimit rateLimitConfig  `json:"rate_limit"`
+	} `json:"llm"`
+	Anek struct {
+		Enabled *bool `json:"enabled"`
+		Inline  struct {
+			Enabled    *bool                     `json:"enabled"`
+			AIJokes    *bool                     `json:"ai_jokes"`
+			Promotions *anekbot.PromotionsConfig `json:"promotions"`
+		} `json:"inline"`
+	} `json:"anek"`
+	Questions struct {
+		Enabled *bool `json:"enabled"`
+	} `json:"questions"`
+	Swearing struct {
+		Enabled   *bool  `json:"enabled"`
+		WordsFile string `json:"words_file"`
+	} `json:"swearing"`
+}
+
+type providerConfig struct {
+	Type  string `json:"type"`
+	Model string `json:"model"`
+	// APIKeyEnv overrides the default env var for Type.
+	APIKeyEnv string `json:"api_key_env"`
+	// APIKey sets the key directly in the config file, taking precedence over APIKeyEnv.
+	APIKey string `json:"api_key"`
+}
+
+type rateLimitConfig struct {
+	MaxConcurrent        int `json:"max_concurrent"`
+	PerUserLimit         int `json:"per_user_limit"`
+	PerUserWindowSeconds int `json:"per_user_window_seconds"`
+	MaxUsers             int `json:"max_users"`
+	PruneIntervalSeconds int `json:"prune_interval_seconds"`
+}
+
+func (c rateLimitConfig) toLimits() llm.Limits {
+	return llm.Limits{
+		MaxConcurrent: c.MaxConcurrent,
+		PerUserLimit:  c.PerUserLimit,
+		PerUserWindow: time.Duration(c.PerUserWindowSeconds) * time.Second,
+		MaxUsers:      c.MaxUsers,
+		PruneInterval: time.Duration(c.PruneIntervalSeconds) * time.Second,
+	}
+}
+
+var defaultAPIKeyEnv = map[string]string{
+	"gemini":      "GEMINI_API_KEY",
+	"huggingface": "HF_API_KEY",
+}
+
+func buildProvider(pc providerConfig) (llm.Provider, error) {
+	defEnv, ok := defaultAPIKeyEnv[pc.Type]
+	if !ok {
+		return nil, fmt.Errorf("llm.providers: unknown type %q: must be %q or %q", pc.Type, "gemini", "huggingface")
+	}
+
+	if pc.APIKey != "" && pc.APIKeyEnv != "" {
+		logging.Warnf("llm provider %s: both api_key and api_key_env are set; using api_key (this may be unintentional)", pc.Type)
+	}
+
+	key := pc.APIKey
+	if key == "" {
+		keyEnv := or(pc.APIKeyEnv, defEnv)
+		key = os.Getenv(keyEnv)
+		if key == "" {
+			logging.Warnf("llm provider %s skipped: env var %s is empty", pc.Type, keyEnv)
+			return nil, nil
+		}
+	}
+	if pc.Type == "gemini" {
+		return llm.NewGeminiProvider(key, pc.Model), nil
+	}
+	return llm.NewHuggingFaceProvider(key, pc.Model), nil
+}
+
+func loadFileConfig(path string) (*fileConfig, error) {
+	if path == "" {
+		return &fileConfig{}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var fc fileConfig
+	if err := dec.Decode(&fc); err != nil {
+		return nil, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	return &fc, nil
+}
+
+func enabled(v *bool) bool {
+	return v == nil || *v
+}
+
+func loadConfig(args []string) (*config, error) {
+	fs := flag.NewFlagSet("anekbot", flag.ContinueOnError)
+	// The config file's own location can't live inside that file, so -config/ANEKBOT_CONFIG
+	// is the one setting that doesn't follow the file > env > default precedence below.
+	configPath := fs.String("config", os.Getenv("ANEKBOT_CONFIG"), "path to the JSON config file (env ANEKBOT_CONFIG)")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+
+	fc, err := loadFileConfig(*configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := &config{
+		botToken:      fileEnvDefault(fc.Bot.Token, "BOT_TOKEN", ""),
+		mode:          fileEnvDefault(fc.Bot.Mode, "ANEKBOT_MODE", "poll"),
+		logLevel:      fileEnvDefault(fc.Bot.LogLevel, "LOG_LEVEL", "warn"),
+		port:          fileEnvDefault(fc.Server.Port, "PORT", "8080"),
+		webhookPath:   or(fc.Server.WebhookPath, "/webhook"),
+		webhookSecret: fileEnvDefault(fc.Server.WebhookSecret, "WEBHOOK_SECRET_TOKEN", ""),
+
+		// Metrics default to disabled, unlike the other *.enabled flags: exposing an HTTP
+		// endpoint is a deliberate opt-in, not a safe default.
+		metricsEnabled: fc.Metrics.Enabled != nil && *fc.Metrics.Enabled,
+		metricsPath:    or(fc.Metrics.Path, "/metrics"),
+		metricsToken:   fileEnvDefault(fc.Metrics.Token, "METRICS_TOKEN", ""),
+		adminUsernames: fc.Admin.Usernames,
+
+		anekEnabled:       enabled(fc.Anek.Enabled),
+		inlineEnabled:     enabled(fc.Anek.Inline.Enabled),
+		aiJokesEnabled:    enabled(fc.Anek.Inline.AIJokes),
+		questionsEnabled:  enabled(fc.Questions.Enabled),
+		swearingEnabled:   enabled(fc.Swearing.Enabled),
+		swearingWordsFile: fc.Swearing.WordsFile,
+		llmLimits:         fc.LLM.RateLimit.toLimits(),
+	}
+
+	for _, pc := range fc.LLM.Providers {
+		provider, err := buildProvider(pc)
+		if err != nil {
+			return nil, err
+		}
+		if provider != nil {
+			cfg.llmProviders = append(cfg.llmProviders, provider)
+		}
+	}
+
+	if fc.Anek.Inline.Promotions != nil {
+		if cfg.promotions, err = anekbot.NewPromotions(*fc.Anek.Inline.Promotions); err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.botToken == "" {
+		return nil, errors.New("bot token is required: set BOT_TOKEN or bot.token in the config file")
+	}
+	if cfg.mode != "webhook" && cfg.mode != "poll" {
+		return nil, fmt.Errorf("invalid mode %q: must be %q or %q", cfg.mode, "webhook", "poll")
+	}
+	if cfg.mode == "webhook" && cfg.webhookSecret == "" {
+		return nil, errors.New("webhook mode requires a secret: set WEBHOOK_SECRET_TOKEN or server.webhook_secret in the config file")
+	}
+	if cfg.mode == "webhook" && cfg.metricsEnabled {
+		if cfg.metricsToken == "" {
+			return nil, errors.New("metrics endpoint requires a token: set METRICS_TOKEN or metrics.token in the config file")
+		}
+		if cfg.metricsPath == cfg.webhookPath || cfg.metricsPath == healthzPath {
+			return nil, fmt.Errorf("metrics.path %q collides with an existing server route", cfg.metricsPath)
+		}
+	}
+	if _, err := logging.ParseLevel(cfg.logLevel); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func or(v, def string) string {
+	if v != "" {
+		return v
+	}
+	return def
+}
+
+func fileEnvDefault(fileValue, envKey, def string) string {
+	if fileValue != "" {
+		return fileValue
+	}
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return def
+}
