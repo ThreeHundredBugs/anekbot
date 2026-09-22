@@ -17,6 +17,7 @@ import (
 
 	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 	"github.com/ThreeHundredBugs/anekbot/internal/logging"
+	"github.com/ThreeHundredBugs/anekbot/internal/stats"
 )
 
 const (
@@ -53,6 +54,7 @@ type AnekHandler struct {
 	randFloat func() float64
 	promos    *Promotions
 	llm       *llm.LLM
+	stats     *stats.Stats
 
 	inlineDisabled  bool
 	aiJokesDisabled bool
@@ -72,6 +74,10 @@ func (h *AnekHandler) SetPromotions(p *Promotions) {
 
 func (h *AnekHandler) SetLLM(client *llm.LLM) {
 	h.llm = client
+}
+
+func (h *AnekHandler) SetStats(s *stats.Stats) {
+	h.stats = s
 }
 
 func (h *AnekHandler) SetInline(enabled, aiJokes bool) {
@@ -106,7 +112,9 @@ func (h *AnekHandler) Handle(ctx context.Context, sender Sender, update *models.
 		ReplyParameters: &models.ReplyParameters{MessageID: msg.ID},
 	}); err != nil {
 		logging.Warnf("anek handler: send message: %v", err)
+		return
 	}
+	h.stats.RecordAnek(stats.UserID(userID(msg.From)), username(msg.From), "message", "classic")
 }
 
 func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *models.Update) {
@@ -142,11 +150,18 @@ func (h *AnekHandler) HandleInline(ctx context.Context, sender Sender, update *m
 		if joke == "" {
 			continue
 		}
+		// Telegram doesn't report which (if any) offered result the user picks unless
+		// inline feedback is enabled; HandleChosenInlineResult records the confirmed send
+		// when it is.
+		markup := h.promos.Keyboard()
+		if markup != nil {
+			h.stats.RecordPromotionShown()
+		}
 		results = append(results, &models.InlineQueryResultArticle{
 			ID:                  strconv.Itoa(i),
 			Title:               inlineTitle(joke),
 			InputMessageContent: models.InputTextMessageContent{MessageText: joke},
-			ReplyMarkup:         h.promos.Keyboard(),
+			ReplyMarkup:         markup,
 		})
 	}
 
@@ -189,12 +204,17 @@ func (h *AnekHandler) answerAIJokePlaceholderInline(ctx context.Context, sender 
 // HandleChosenInlineResult replaces answerAIJokePlaceholderInline's placeholder with
 // the real joke. Requires inline feedback enabled via BotFather's /setinlinefeedback.
 func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sender, update *models.Update) {
-	if update.ChosenInlineResult == nil || h.aiJokesDisabled {
+	if update.ChosenInlineResult == nil {
 		return
 	}
 	chosen := update.ChosenInlineResult
 
-	if chosen.ResultID != aiJokeResultID || chosen.InlineMessageID == "" {
+	if chosen.ResultID != aiJokeResultID {
+		// A classic (non-AI) inline joke was actually sent
+		h.stats.RecordAnek(stats.UserID(userID(&chosen.From)), username(&chosen.From), "inline", "classic")
+		return
+	}
+	if h.aiJokesDisabled || chosen.InlineMessageID == "" {
 		return
 	}
 	topic := strings.Join(strings.Fields(chosen.Query), " ")
@@ -215,6 +235,7 @@ func (h *AnekHandler) HandleChosenInlineResult(ctx context.Context, sender Sende
 		return
 	}
 
+	h.stats.RecordAnek(stats.UserID(userID(&chosen.From)), username(&chosen.From), "inline", "ai")
 	h.editInlineMessage(ctx, sender, chosen.InlineMessageID, truncateToRunes(joke, telegramMessageMaxRunes), true, true)
 }
 
@@ -223,6 +244,7 @@ func (h *AnekHandler) editInlineMessage(ctx context.Context, sender Sender, inli
 	if withPromo {
 		if promoMarkup := h.promos.Keyboard(); promoMarkup != nil {
 			markup = promoMarkup
+			h.stats.RecordPromotionShown()
 		}
 	}
 	params := &bot.EditMessageTextParams{

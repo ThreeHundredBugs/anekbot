@@ -22,6 +22,13 @@ type config struct {
 	webhookPath   string
 	webhookSecret string
 
+	metricsEnabled bool
+	metricsPath    string
+	metricsToken   string
+
+	// adminUsernames are Telegram @handles (no "@")
+	adminUsernames []string
+
 	// llmProviders is tried in order; empty means no LLM.
 	llmProviders []llm.Provider
 	llmLimits    llm.Limits
@@ -46,6 +53,15 @@ type fileConfig struct {
 		WebhookPath   string `json:"webhook_path"`
 		WebhookSecret string `json:"webhook_secret"`
 	} `json:"server"`
+	Metrics struct {
+		Enabled *bool  `json:"enabled"`
+		Path    string `json:"path"`
+		Token   string `json:"token"`
+	} `json:"metrics"`
+	Admin struct {
+		// Usernames are Telegram @handles trusted with the /stats command.
+		Usernames []string `json:"usernames"`
+	} `json:"admin"`
 	LLM struct {
 		Providers []providerConfig `json:"providers"`
 		RateLimit rateLimitConfig  `json:"rate_limit"`
@@ -72,10 +88,10 @@ type providerConfig struct {
 	Model string `json:"model"`
 	// APIKeyEnv overrides the default env var for Type.
 	APIKeyEnv string `json:"api_key_env"`
+	// APIKey sets the key directly in the config file, taking precedence over APIKeyEnv.
+	APIKey string `json:"api_key"`
 }
 
-// rateLimitConfig is the "llm.rate_limit" section of the config file; a zero value in any
-// field falls back to llm.Limits' default for it.
 type rateLimitConfig struct {
 	MaxConcurrent        int `json:"max_concurrent"`
 	PerUserLimit         int `json:"per_user_limit"`
@@ -104,11 +120,19 @@ func buildProvider(pc providerConfig) (llm.Provider, error) {
 	if !ok {
 		return nil, fmt.Errorf("llm.providers: unknown type %q: must be %q or %q", pc.Type, "gemini", "huggingface")
 	}
-	keyEnv := or(pc.APIKeyEnv, defEnv)
-	key := os.Getenv(keyEnv)
+
+	if pc.APIKey != "" && pc.APIKeyEnv != "" {
+		logging.Warnf("llm provider %s: both api_key and api_key_env are set; using api_key (this may be unintentional)", pc.Type)
+	}
+
+	key := pc.APIKey
 	if key == "" {
-		logging.Warnf("llm provider %s skipped: env var %s is empty", pc.Type, keyEnv)
-		return nil, nil
+		keyEnv := or(pc.APIKeyEnv, defEnv)
+		key = os.Getenv(keyEnv)
+		if key == "" {
+			logging.Warnf("llm provider %s skipped: env var %s is empty", pc.Type, keyEnv)
+			return nil, nil
+		}
 	}
 	if pc.Type == "gemini" {
 		return llm.NewGeminiProvider(key, pc.Model), nil
@@ -139,6 +163,8 @@ func enabled(v *bool) bool {
 
 func loadConfig(args []string) (*config, error) {
 	fs := flag.NewFlagSet("anekbot", flag.ContinueOnError)
+	// The config file's own location can't live inside that file, so -config/ANEKBOT_CONFIG
+	// is the one setting that doesn't follow the file > env > default precedence below.
 	configPath := fs.String("config", os.Getenv("ANEKBOT_CONFIG"), "path to the JSON config file (env ANEKBOT_CONFIG)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -150,12 +176,19 @@ func loadConfig(args []string) (*config, error) {
 	}
 
 	cfg := &config{
-		botToken:      envOrDefault("BOT_TOKEN", fc.Bot.Token),
-		mode:          envOrDefault("ANEKBOT_MODE", or(fc.Bot.Mode, "webhook")),
-		logLevel:      envOrDefault("LOG_LEVEL", or(fc.Bot.LogLevel, "warn")),
-		port:          envOrDefault("PORT", or(fc.Server.Port, "8080")),
+		botToken:      fileEnvDefault(fc.Bot.Token, "BOT_TOKEN", ""),
+		mode:          fileEnvDefault(fc.Bot.Mode, "ANEKBOT_MODE", "poll"),
+		logLevel:      fileEnvDefault(fc.Bot.LogLevel, "LOG_LEVEL", "warn"),
+		port:          fileEnvDefault(fc.Server.Port, "PORT", "8080"),
 		webhookPath:   or(fc.Server.WebhookPath, "/webhook"),
-		webhookSecret: envOrDefault("WEBHOOK_SECRET_TOKEN", fc.Server.WebhookSecret),
+		webhookSecret: fileEnvDefault(fc.Server.WebhookSecret, "WEBHOOK_SECRET_TOKEN", ""),
+
+		// Metrics default to disabled, unlike the other *.enabled flags: exposing an HTTP
+		// endpoint is a deliberate opt-in, not a safe default.
+		metricsEnabled: fc.Metrics.Enabled != nil && *fc.Metrics.Enabled,
+		metricsPath:    or(fc.Metrics.Path, "/metrics"),
+		metricsToken:   fileEnvDefault(fc.Metrics.Token, "METRICS_TOKEN", ""),
+		adminUsernames: fc.Admin.Usernames,
 
 		anekEnabled:       enabled(fc.Anek.Enabled),
 		inlineEnabled:     enabled(fc.Anek.Inline.Enabled),
@@ -191,6 +224,14 @@ func loadConfig(args []string) (*config, error) {
 	if cfg.mode == "webhook" && cfg.webhookSecret == "" {
 		return nil, errors.New("webhook mode requires a secret: set WEBHOOK_SECRET_TOKEN or server.webhook_secret in the config file")
 	}
+	if cfg.mode == "webhook" && cfg.metricsEnabled {
+		if cfg.metricsToken == "" {
+			return nil, errors.New("metrics endpoint requires a token: set METRICS_TOKEN or metrics.token in the config file")
+		}
+		if cfg.metricsPath == cfg.webhookPath || cfg.metricsPath == healthzPath {
+			return nil, fmt.Errorf("metrics.path %q collides with an existing server route", cfg.metricsPath)
+		}
+	}
 	if _, err := logging.ParseLevel(cfg.logLevel); err != nil {
 		return nil, err
 	}
@@ -205,8 +246,11 @@ func or(v, def string) string {
 	return def
 }
 
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
+func fileEnvDefault(fileValue, envKey, def string) string {
+	if fileValue != "" {
+		return fileValue
+	}
+	if v := os.Getenv(envKey); v != "" {
 		return v
 	}
 	return def

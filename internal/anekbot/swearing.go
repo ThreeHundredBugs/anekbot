@@ -12,6 +12,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"github.com/ThreeHundredBugs/anekbot/internal/logging"
+	"github.com/ThreeHundredBugs/anekbot/internal/stats"
 )
 
 //go:embed swearwords.txt
@@ -22,6 +23,7 @@ var wordPattern = regexp.MustCompile(`[\p{L}\p{N}_]+`)
 
 type SwearingHandler struct {
 	words map[string]struct{}
+	stats *stats.Stats
 }
 
 func NewSwearingHandler(extraWordListPath string) (*SwearingHandler, error) {
@@ -30,6 +32,10 @@ func NewSwearingHandler(extraWordListPath string) (*SwearingHandler, error) {
 		return nil, err
 	}
 	return &SwearingHandler{words: words}, nil
+}
+
+func (h *SwearingHandler) SetStats(s *stats.Stats) {
+	h.stats = s
 }
 
 func (h *SwearingHandler) Name() string {
@@ -60,7 +66,9 @@ func (h *SwearingHandler) Handle(ctx context.Context, sender Sender, update *mod
 			},
 		}); err != nil {
 			logging.Warnf("swearing handler: set message reaction: %v", err)
+			return
 		}
+		h.stats.RecordSwearingReaction()
 		return
 	}
 }

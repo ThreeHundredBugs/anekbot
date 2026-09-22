@@ -10,6 +10,16 @@
     "webhook_secret": ""
   },
 
+  "metrics": {
+    "enabled": true,
+    "path": "/metrics",
+    "token": "replace-me"
+  },
+
+  "admin": {
+    "usernames": []
+  },
+
   "llm": {
     "providers": [
       { "type": "gemini", "model": "gemini-3.6-flash", "api_key_env": "GEMINI_API_KEY" },

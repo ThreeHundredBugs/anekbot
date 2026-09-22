@@ -11,10 +11,12 @@ import (
 
 	"github.com/ThreeHundredBugs/anekbot/internal/llm"
 	"github.com/ThreeHundredBugs/anekbot/internal/logging"
+	"github.com/ThreeHundredBugs/anekbot/internal/stats"
 )
 
 type QuestionsHandler struct {
 	llm            *llm.LLM
+	stats          *stats.Stats
 	mentionPattern *regexp.Regexp
 }
 
@@ -23,6 +25,10 @@ func NewQuestionsHandler(botUsername string, client *llm.LLM) *QuestionsHandler 
 		llm:            client,
 		mentionPattern: regexp.MustCompile(`(?i)@` + regexp.QuoteMeta(botUsername) + `\b`),
 	}
+}
+
+func (h *QuestionsHandler) SetStats(s *stats.Stats) {
+	h.stats = s
 }
 
 func (h *QuestionsHandler) Name() string {
@@ -52,6 +58,8 @@ func (h *QuestionsHandler) Handle(ctx context.Context, sender Sender, update *mo
 		}
 		return
 	}
+
+	h.stats.RecordQuestionAnswered(stats.UserID(userID(msg.From)), username(msg.From))
 
 	signature := fmt.Sprintf("\n\nby %s", providerName)
 	answer = truncateToRunes(answer, telegramMessageMaxRunes-len([]rune(signature))) + signature

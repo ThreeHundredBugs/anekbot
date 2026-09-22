@@ -31,6 +31,7 @@ type Dispatcher struct {
 	swearing  *SwearingHandler
 	questions *QuestionsHandler
 	help      *HelpHandler
+	stats     *StatsHandler
 }
 
 func NewDispatcher(anek *AnekHandler, swearing *SwearingHandler, questions *QuestionsHandler, help *HelpHandler) *Dispatcher {
@@ -43,6 +44,10 @@ func (d *Dispatcher) SetQuestions(questions *QuestionsHandler) {
 
 func (d *Dispatcher) SetHelp(help *HelpHandler) {
 	d.help = help
+}
+
+func (d *Dispatcher) SetStatsHandler(stats *StatsHandler) {
+	d.stats = stats
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models.Update) {
@@ -65,6 +70,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, sender Sender, update *models
 		}
 		if d.help != nil {
 			handlers = append(handlers, d.help)
+		}
+		if d.stats != nil {
+			handlers = append(handlers, d.stats)
 		}
 
 		var wg sync.WaitGroup
@@ -117,4 +125,11 @@ func userID(u *models.User) llm.UserID {
 		return 0
 	}
 	return llm.UserID(u.ID)
+}
+
+func username(u *models.User) string {
+	if u == nil {
+		return ""
+	}
+	return u.Username
 }
